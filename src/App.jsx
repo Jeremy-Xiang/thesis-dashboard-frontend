@@ -210,7 +210,7 @@ export default function ThesisDashboard() {
   // live data
   const pf   = useApi("/api/portfolio",              60_000);
   const px   = useApi("/api/prices",                 60_000);
-  const feed = useApi("/api/news?limit=40",          300_000);
+  const feed = useApi("/api/news?limit=2000",          300_000);
   const attr = useApi(`/api/attribution?period=${period}`, null);
 
   useEffect(() => { attr.refetch(); }, [period]);
