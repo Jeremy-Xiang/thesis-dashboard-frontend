@@ -1,28 +1,47 @@
 import { useState, useEffect, useCallback } from "react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from "recharts";
 
-// In production, set VITE_API_URL (or REACT_APP_API_URL) in your host's env vars.
-// Locally it falls back to localhost:8000.
 const API =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) ||
   (typeof process !== "undefined" && process.env?.REACT_APP_API_URL) ||
   "http://localhost:8000";
 
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const C = {
+  bg:      "#0a0a0a",
+  surface: "#111111",
+  border:  "#1f1f1f",
+  border2: "#2a2a2a",
+  text:    "#e8e8e8",
+  muted:   "#666666",
+  dim:     "#333333",
+  accent:  "#f0b429",   // single amber accent
+  green:   "#22c55e",
+  red:     "#ef4444",
+  yellow:  "#f0b429",
+  // theme colors — flat, no gradients
+  ai:      "#60a5fa",
+  defense: "#f97316",
+  energy:  "#4ade80",
+  bio:     "#c084fc",
+  health:  "#f472b6",
+};
+
 const THEMES = {
-  "AI Infrastructure":         { color: "#00e5ff", icon: "◈", description: "Semiconductors, cloud hyperscalers & compute infrastructure for AI workloads" },
-  "Defense":                   { color: "#ff6d00", icon: "⬡", description: "Defense contractors, aerospace, drone warfare & battlefield AI" },
-  "Energy Transition":         { color: "#69f0ae", icon: "◎", description: "Nuclear renaissance, grid infrastructure & data center power" },
-  "Biodefense & Pandemic":     { color: "#e040fb", icon: "⬟", description: "mRNA platforms, antivirals & outbreak response — tracking hantavirus, mpox & emerging zoonotic risk" },
-  "Healthcare Infrastructure": { color: "#ff80ab", icon: "✦", description: "Diagnostics, medical devices, lab instruments & health services" },
+  "AI Infrastructure":         { color: C.ai,      icon: "AI",   short: "AI"       },
+  "Defense":                   { color: C.defense,  icon: "DEF",  short: "DEF"      },
+  "Energy Transition":         { color: C.energy,   icon: "NRG",  short: "NRG"      },
+  "Biodefense & Pandemic":     { color: C.bio,      icon: "BIO",  short: "BIO"      },
+  "Healthcare Infrastructure": { color: C.health,   icon: "MED",  short: "MED"      },
 };
 
 const PERIODS = ["1m","3m","6m","1y","3y"];
 
-// ── Data hook ─────────────────────────────────────────────────────────────────
+// ── Data fetching ─────────────────────────────────────────────────────────────
 function useApi(path, pollMs = null) {
-  const [data, setData]       = useState(null);
+  const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState(null);
+  const [error,   setError]   = useState(null);
   const [updated, setUpdated] = useState(null);
 
   const run = useCallback(async () => {
@@ -32,7 +51,7 @@ function useApi(path, pollMs = null) {
       setData(await r.json());
       setError(null);
       setUpdated(new Date());
-    } catch (e) { setError(e.message); }
+    } catch(e) { setError(e.message); }
     finally { setLoading(false); }
   }, [path]);
 
@@ -44,84 +63,345 @@ function useApi(path, pollMs = null) {
   return { data, loading, error, updated, refetch: run };
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const f$ = v => v == null ? "—" : v >= 1000 ? `$${(v/1000).toFixed(0)}k` : `$${v.toFixed(2)}`;
-const fp = v => v == null ? "—" : `${v>=0?"+":""}${v.toFixed(1)}%`;
+// ── Formatters ────────────────────────────────────────────────────────────────
+const f$ = v => v == null ? "—" : v >= 1_000_000 ? `$${(v/1_000_000).toFixed(1)}M` : v >= 1000 ? `$${(v/1000).toFixed(0)}k` : `$${v.toFixed(2)}`;
+const fp = v => v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 const ago = iso => {
   if (!iso) return "";
   try {
-    const dt = new Date(iso);
-    if (isNaN(dt)) return "";
-    const s = (Date.now() - dt) / 1000;
-    if (s < 0) return "just now";
-    if (s < 60) return "just now";
-    if (s < 3600) return `${Math.round(s/60)}m ago`;
-    if (s < 86400) return `${Math.round(s/3600)}h ago`;
-    return `${Math.round(s/86400)}d ago`;
-  } catch(e) { return ""; }
+    const s = (Date.now() - new Date(iso)) / 1000;
+    if (s < 0)     return "just now";
+    if (s < 60)    return "just now";
+    if (s < 3600)  return `${Math.round(s/60)}m`;
+    if (s < 86400) return `${Math.round(s/3600)}h`;
+    return `${Math.round(s/86400)}d`;
+  } catch { return ""; }
+};
+const fmtDate = iso => {
+  try {
+    const d = new Date(iso);
+    return isNaN(d) ? iso?.slice(5) ?? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  } catch { return ""; }
 };
 
-// ── UI atoms ──────────────────────────────────────────────────────────────────
-const Skel = ({ h=16, w="100%" }) => (
-  <div style={{ height: h, width: w, background: "#1a1f2e", borderRadius: 4, animation: "pulse 1.5s ease infinite" }} />
+// ── Shared primitives ─────────────────────────────────────────────────────────
+const Skel = ({ h=14, w="100%" }) => (
+  <div style={{ height:h, width:w, background:C.border2, borderRadius:2, animation:"pulse 1.4s ease infinite" }} />
 );
 
-const SentBar = ({ score=0.5 }) => {
-  const pct = Math.round(score * 100);
-  const col = score > 0.65 ? "#69f0ae" : score > 0.45 ? "#ffeb3b" : "#ff5252";
-  return (
-    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-      <div style={{ flex:1, height:4, background:"#1a1f2e", borderRadius:2 }}>
-        <div style={{ width:`${pct}%`, height:"100%", background:col, borderRadius:2, transition:"width 0.5s" }} />
-      </div>
-      <span style={{ fontSize:11, color:col, fontFamily:"monospace", minWidth:28 }}>{pct}</span>
-    </div>
-  );
-};
+const Mono = ({ children, style={} }) => (
+  <span style={{ fontFamily:"'IBM Plex Mono',monospace", ...style }}>{children}</span>
+);
 
-const Tag = ({ theme }) => {
-  const c = THEMES[theme]?.color ?? "#aaa";
+const Label = ({ children }) => (
+  <div style={{ fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:C.muted, marginBottom:4 }}>
+    {children}
+  </div>
+);
+
+const Divider = () => <div style={{ height:1, background:C.border, margin:"0" }} />;
+
+const SigBadge = ({ signal }) => {
+  const col = signal === "BUY" ? C.green : signal === "REDUCE" ? C.red : C.yellow;
   return (
-    <span style={{ fontSize:9, fontWeight:700, letterSpacing:"0.1em", padding:"2px 6px", borderRadius:2,
-      background:c+"18", color:c, border:`1px solid ${c}40`, textTransform:"uppercase", fontFamily:"monospace" }}>
-      {theme?.split(" ")[0]}
+    <span style={{ fontSize:10, fontWeight:700, padding:"2px 6px", borderRadius:2,
+      background: col + "18", color: col, fontFamily:"'IBM Plex Mono',monospace",
+      letterSpacing:"0.05em" }}>
+      {signal}
     </span>
   );
 };
 
-const StatCard = ({ label, value, sub, accent="#00e5ff", loading }) => (
-  <div style={{ padding:"18px 20px", background:"#0d1117", border:"1px solid #1e2533", borderRadius:8, borderLeft:`3px solid ${accent}` }}>
-    <div style={{ fontSize:10, color:"#5a6480", letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:6, fontFamily:"monospace" }}>{label}</div>
-    {loading ? <Skel h={26} w="60%" /> : <div style={{ fontSize:22, fontWeight:800, color:"#eef2ff", fontFamily:"'Space Mono',monospace" }}>{value}</div>}
-    {sub && <div style={{ fontSize:11, color:"#5a6480", marginTop:4 }}>{sub}</div>}
-  </div>
-);
+const ThemeTag = ({ theme }) => {
+  const cfg = THEMES[theme];
+  if (!cfg) return null;
+  return (
+    <span style={{ fontSize:9, fontWeight:700, padding:"1px 5px", borderRadius:2,
+      background: cfg.color + "18", color: cfg.color,
+      fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.06em" }}>
+      {cfg.short}
+    </span>
+  );
+};
 
-const Err = ({ msg, retry }) => (
-  <div style={{ padding:"10px 16px", background:"#ff525218", border:"1px solid #ff525240", borderRadius:6, display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
-    <span style={{ fontSize:12, color:"#ff8a80", fontFamily:"monospace" }}>⚠ {msg}</span>
-    {retry && <button onClick={retry} style={{ background:"#ff525224", border:"1px solid #ff525240", color:"#ff8a80", borderRadius:4, padding:"3px 10px", fontSize:11, cursor:"pointer" }}>Retry</button>}
-  </div>
-);
-
-const Spinner = () => (
-  <div style={{ height:240, display:"flex", alignItems:"center", justifyContent:"center" }}>
-    <div style={{ width:24, height:24, border:"2px solid #1e2533", borderTopColor:"#00e5ff", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
+const ProbBar = ({ prob, color }) => (
+  <div style={{ height:3, background:C.border2, borderRadius:1, overflow:"hidden" }}>
+    <div style={{ height:"100%", width:`${Math.round(prob*100)}%`, background:color, transition:"width 0.4s" }} />
   </div>
 );
 
 const ChartTip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
-    <div style={{ background:"#0d1117", border:"1px solid #1e2533", borderRadius:6, padding:"10px 14px" }}>
-      <div style={{ color:"#5a6480", fontSize:11, marginBottom:6, fontFamily:"monospace" }}>{label}</div>
-      {payload.map(p => <div key={p.name} style={{ color:THEMES[p.name]?.color??"#00e5ff", fontSize:12, fontFamily:"monospace" }}>{p.name}: {f$(p.value)}</div>)}
+    <div style={{ background:C.surface, border:`1px solid ${C.border2}`, borderRadius:4, padding:"8px 12px", fontSize:11 }}>
+      <div style={{ color:C.muted, marginBottom:4, fontFamily:"'IBM Plex Mono',monospace" }}>{fmtDate(label)}</div>
+      {payload.map(p => (
+        <div key={p.name} style={{ color:THEMES[p.name]?.color ?? C.accent, fontFamily:"'IBM Plex Mono',monospace" }}>
+          {THEMES[p.name]?.short}: {f$(p.value)}
+        </div>
+      ))}
     </div>
   );
 };
 
-// ── FinBERT workbench ─────────────────────────────────────────────────────────
-function Analyzer({ news }) {
+// ── Candlestick-style sparkline using area chart ──────────────────────────────
+function MiniChart({ data, color }) {
+  if (!data?.length) return <div style={{ height:40, background:C.border, borderRadius:2 }} />;
+  return (
+    <ResponsiveContainer width="100%" height={40}>
+      <AreaChart data={data} margin={{ top:2, right:0, left:0, bottom:0 }}>
+        <defs>
+          <linearGradient id={`spark-${color.replace("#","")}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.3} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <Area type="monotone" dataKey="total" stroke={color} strokeWidth={1.5}
+          fill={`url(#spark-${color.replace("#","")})`} dot={false} />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ── Sentiment bar ─────────────────────────────────────────────────────────────
+const SentBar = ({ score=0.5 }) => {
+  const pct = Math.round(score * 100);
+  const col = score > 0.65 ? C.green : score > 0.45 ? C.yellow : C.red;
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+      <div style={{ flex:1, height:3, background:C.border2, borderRadius:1 }}>
+        <div style={{ width:`${pct}%`, height:"100%", background:col, borderRadius:1, transition:"width 0.4s" }} />
+      </div>
+      <Mono style={{ fontSize:10, color:col, minWidth:24 }}>{pct}</Mono>
+    </div>
+  );
+};
+
+// ── Signals tab ───────────────────────────────────────────────────────────────
+function SignalsTab({ signalData, signals }) {
+  const [customTicker,  setCustomTicker]  = useState("");
+  const [lookupResult,  setLookupResult]  = useState(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError,   setLookupError]   = useState(null);
+  const [themeFilter,   setThemeFilter]   = useState("All");
+
+  const lookup = async () => {
+    const t = customTicker.trim().toUpperCase();
+    if (!t) return;
+    setLookupLoading(true); setLookupResult(null); setLookupError(null);
+    try {
+      const r = await fetch(`${API}/api/signals/ticker/${t}`);
+      if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Not found"); }
+      setLookupResult(await r.json());
+    } catch(e) { setLookupError(e.message); }
+    finally { setLookupLoading(false); }
+  };
+
+  const themeSigs  = signalData?.themes  ?? {};
+  const tickerSigs = signalData?.tickers ?? {};
+
+  const themeTickerMap = {};
+  Object.entries(THEMES).forEach(([t, cfg]) => { cfg.tickers?.forEach(tk => { themeTickerMap[tk] = t; }); });
+
+  const filtered = themeFilter === "All"
+    ? Object.entries(tickerSigs)
+    : Object.entries(tickerSigs).filter(([tk]) => themeTickerMap[tk] === themeFilter);
+
+  const sorted = [...filtered].sort((a,b) => b[1].outperform_prob - a[1].outperform_prob);
+
+  const sigCol = s => s === "BUY" ? C.green : s === "REDUCE" ? C.red : C.yellow;
+
+  return (
+    <div>
+      {/* Header row */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:20 }}>
+        <div style={{ fontSize:13, fontWeight:600 }}>Prediction Signals</div>
+        <Mono style={{ fontSize:11, color:C.muted }}>
+          Random Forest · 3y training · 30-day outperformance vs SPY
+          {signals.data?.trained_at && ` · trained ${new Date(signals.data.trained_at).toLocaleDateString()}`}
+        </Mono>
+      </div>
+
+      {/* Custom lookup */}
+      <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, padding:16, marginBottom:16 }}>
+        <Label>Analyze any ticker</Label>
+        <div style={{ display:"flex", gap:8, marginBottom:lookupResult || lookupError ? 12 : 0 }}>
+          <input value={customTicker}
+            onChange={e => setCustomTicker(e.target.value.toUpperCase())}
+            onKeyDown={e => e.key === "Enter" && lookup()}
+            placeholder="AAPL, TSLA, INO, MRNA…"
+            style={{ flex:1, padding:"7px 10px", background:C.bg, border:`1px solid ${C.border2}`,
+              borderRadius:3, color:C.text, fontSize:12, fontFamily:"'IBM Plex Mono',monospace", outline:"none" }}
+          />
+          <button onClick={lookup} disabled={lookupLoading || !customTicker.trim()} style={{
+            padding:"7px 18px", borderRadius:3, border:`1px solid ${C.accent}`,
+            background: lookupLoading ? C.border : C.accent + "18", color:C.accent,
+            fontSize:11, fontFamily:"'IBM Plex Mono',monospace", cursor:lookupLoading?"not-allowed":"pointer",
+            letterSpacing:"0.05em", fontWeight:600,
+          }}>
+            {lookupLoading ? "…" : "RUN →"}
+          </button>
+        </div>
+
+        {lookupError && (
+          <Mono style={{ fontSize:11, color:C.red }}>✗ {lookupError}</Mono>
+        )}
+
+        {lookupResult && (() => {
+          const sig  = lookupResult.signal;
+          const col  = sigCol(sig);
+          const prob = Math.round(lookupResult.outperform_prob * 100);
+          return (
+            <div style={{ background:C.bg, border:`1px solid ${C.border2}`, borderRadius:4, padding:16 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
+                <div>
+                  <div style={{ fontSize:20, fontWeight:700, fontFamily:"'IBM Plex Mono',monospace", color:C.text, marginBottom:6 }}>
+                    {lookupResult.ticker ?? customTicker}
+                  </div>
+                  <div style={{ display:"flex", gap:14 }}>
+                    {lookupResult.current_price && <Mono style={{ fontSize:12 }}>${lookupResult.current_price}</Mono>}
+                    {lookupResult.change_pct != null && (
+                      <Mono style={{ fontSize:12, color:lookupResult.change_pct>=0?C.green:C.red }}>
+                        {lookupResult.change_pct>=0?"+":""}{lookupResult.change_pct?.toFixed(2)}%
+                      </Mono>
+                    )}
+                    {lookupResult.mom_20d != null && (
+                      <Mono style={{ fontSize:11, color:C.muted }}>20d {lookupResult.mom_20d>=0?"+":""}{lookupResult.mom_20d?.toFixed(1)}%</Mono>
+                    )}
+                  </div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontSize:26, fontWeight:800, color:col, fontFamily:"'IBM Plex Mono',monospace" }}>{sig}</div>
+                  <Mono style={{ fontSize:11, color:C.muted }}>{prob}% vs SPY</Mono>
+                </div>
+              </div>
+
+              {/* Probability ruler */}
+              <div style={{ marginBottom:14 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                  <Mono style={{ fontSize:9, color:C.muted }}>REDUCE ←</Mono>
+                  <Mono style={{ fontSize:9, color:C.muted }}>40% / 60%</Mono>
+                  <Mono style={{ fontSize:9, color:C.muted }}>→ BUY</Mono>
+                </div>
+                <div style={{ height:8, background:C.border2, borderRadius:2, position:"relative" }}>
+                  <div style={{ position:"absolute", left:"40%", width:1, height:"100%", background:C.border }} />
+                  <div style={{ position:"absolute", left:"60%", width:1, height:"100%", background:C.border }} />
+                  <div style={{ position:"absolute", left:`${prob}%`, transform:"translateX(-50%)",
+                    width:10, height:10, borderRadius:"50%", background:col, top:-1,
+                    boxShadow:`0 0 6px ${col}88` }} />
+                  <div style={{ width:`${prob}%`, height:"100%", background:col+"28", borderRadius:2 }} />
+                </div>
+              </div>
+
+              {/* Feature importance */}
+              {lookupResult.feature_importance && (
+                <div>
+                  <Label>What's driving this</Label>
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                    {Object.entries(lookupResult.feature_importance)
+                      .sort((a,b)=>b[1]-a[1])
+                      .map(([feat, imp]) => (
+                        <div key={feat} style={{ padding:"3px 8px", background:C.border, borderRadius:2 }}>
+                          <Mono style={{ fontSize:10, color:C.muted }}>{feat} </Mono>
+                          <Mono style={{ fontSize:10, color:col }}>{(imp*100).toFixed(0)}%</Mono>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
+              )}
+
+              <div style={{ marginTop:10 }}>
+                <Mono style={{ fontSize:10, color:C.dim }}>
+                  AUC {lookupResult.auc?.toFixed(3)} · {lookupResult.n_samples} training days · {lookupResult.source}
+                </Mono>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* Theme signals row */}
+      {Object.keys(themeSigs).length > 0 && (
+        <div style={{ marginBottom:16 }}>
+          <Label>Theme signals</Label>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8 }}>
+            {Object.entries(themeSigs).map(([theme, sig]) => {
+              const cfg  = THEMES[theme] ?? { color:C.muted, short:"—" };
+              const col  = sigCol(sig.signal);
+              const prob = Math.round(sig.outperform_prob * 100);
+              return (
+                <div key={theme} style={{ padding:"12px 14px", background:C.surface,
+                  border:`1px solid ${C.border}`, borderRadius:4, borderTop:`2px solid ${col}` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+                    <Mono style={{ fontSize:10, color:cfg.color }}>{cfg.short}</Mono>
+                    <SigBadge signal={sig.signal} />
+                  </div>
+                  <div style={{ fontSize:20, fontWeight:800, color:col, fontFamily:"'IBM Plex Mono',monospace", marginBottom:6 }}>{prob}%</div>
+                  <ProbBar prob={sig.outperform_prob} color={col} />
+                  <Mono style={{ fontSize:9, color:C.dim, marginTop:6 }}>AUC {sig.auc?.toFixed(2)}</Mono>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Filter row */}
+      <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
+        {["All", ...Object.keys(THEMES)].map(t => (
+          <button key={t} onClick={() => setThemeFilter(t)} style={{
+            padding:"4px 10px", borderRadius:2, fontSize:10, fontFamily:"'IBM Plex Mono',monospace",
+            cursor:"pointer", letterSpacing:"0.05em",
+            color: themeFilter===t ? C.bg : C.muted,
+            background: themeFilter===t ? C.accent : "transparent",
+            border: `1px solid ${themeFilter===t ? C.accent : C.border}`,
+          }}>
+            {t === "All" ? "ALL" : THEMES[t].short}
+          </button>
+        ))}
+        <Mono style={{ marginLeft:"auto", fontSize:10, color:C.dim }}>
+          {sorted.length} tickers · sorted by probability
+        </Mono>
+      </div>
+
+      {/* Ticker grid */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:8 }}>
+        {sorted.map(([ticker, sig]) => {
+          const theme = themeTickerMap[ticker];
+          const cfg   = THEMES[theme] ?? { color:C.muted };
+          const col   = sigCol(sig.signal);
+          const prob  = Math.round(sig.outperform_prob * 100);
+          return (
+            <div key={ticker}
+              onClick={() => { setCustomTicker(ticker); setLookupResult({...sig, ticker}); }}
+              style={{ padding:"12px 14px", background:C.surface, border:`1px solid ${C.border}`,
+                borderRadius:4, cursor:"pointer", borderLeft:`3px solid ${col}`,
+                transition:"border-color 0.15s" }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = col}
+              onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                <div>
+                  <Mono style={{ fontSize:14, fontWeight:700, color:C.text }}>{ticker}</Mono>
+                  <div style={{ marginTop:3 }}><ThemeTag theme={theme} /></div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <SigBadge signal={sig.signal} />
+                  <Mono style={{ fontSize:11, color:C.muted, display:"block", marginTop:4 }}>{prob}%</Mono>
+                </div>
+              </div>
+              <ProbBar prob={sig.outperform_prob} color={col} />
+              <Mono style={{ fontSize:9, color:C.dim, marginTop:6 }}>AUC {sig.auc?.toFixed(2)}</Mono>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Analyzer tab ──────────────────────────────────────────────────────────────
+function AnalyzerTab({ news }) {
   const [text, setText] = useState("");
   const [res,  setRes]  = useState(null);
   const [busy, setBusy] = useState(false);
@@ -138,113 +418,119 @@ function Analyzer({ news }) {
     finally { setBusy(false); }
   };
 
-  const lc = l => l === "positive" ? "#69f0ae" : l === "negative" ? "#ff5252" : "#ffeb3b";
+  const lc = l => l === "positive" ? C.green : l === "negative" ? C.red : C.yellow;
 
   return (
-    <>
-      <div style={{ background:"#0d1117", border:"1px solid #1e2533", borderRadius:8, padding:20, marginBottom:16 }}>
-        <div style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace", marginBottom:14 }}>Sentiment Workbench</div>
-        <div style={{ display:"flex", gap:10, marginBottom:12 }}>
+    <div>
+      <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, padding:16, marginBottom:16 }}>
+        <Label>Score a headline</Label>
+        <div style={{ display:"flex", gap:8, marginBottom:12 }}>
           <input value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&analyze()}
-            placeholder="Paste any financial headline — hit Enter to score…"
-            style={{ flex:1, padding:"9px 14px", background:"#080c12", border:"1px solid #1e2533", borderRadius:6,
-              color:"#eef2ff", fontSize:13, fontFamily:"monospace", outline:"none" }} />
-          <button onClick={analyze} disabled={busy||!text.trim()} style={{ padding:"9px 20px", borderRadius:6,
-            border:"1px solid #00e5ff40", background:busy?"#00e5ff10":"#00e5ff18", color:"#00e5ff",
-            fontSize:12, fontFamily:"monospace", cursor:busy?"not-allowed":"pointer" }}>
-            {busy ? "…" : "Analyze →"}
+            placeholder="Paste any financial headline and hit Enter"
+            style={{ flex:1, padding:"7px 10px", background:C.bg, border:`1px solid ${C.border2}`,
+              borderRadius:3, color:C.text, fontSize:12, fontFamily:"'IBM Plex Mono',monospace", outline:"none" }} />
+          <button onClick={analyze} disabled={busy||!text.trim()} style={{
+            padding:"7px 18px", borderRadius:3, border:`1px solid ${C.accent}`,
+            background:busy?C.border:C.accent+"18", color:C.accent, fontSize:11,
+            fontFamily:"'IBM Plex Mono',monospace", cursor:busy?"not-allowed":"pointer",
+            fontWeight:600, letterSpacing:"0.05em" }}>
+            {busy ? "…" : "SCORE →"}
           </button>
         </div>
-        {err && <Err msg={err} />}
+        {err && <Mono style={{ fontSize:11, color:C.red }}>✗ {err}</Mono>}
         {res && (
-          <div style={{ display:"flex", gap:20, padding:"12px 16px", background:"#080c12", borderRadius:6, border:"1px solid #1e2533", flexWrap:"wrap" }}>
+          <div style={{ background:C.bg, border:`1px solid ${C.border2}`, borderRadius:3, padding:14,
+            display:"flex", gap:24, flexWrap:"wrap", alignItems:"center" }}>
             {[
-              { label:"LABEL",    val: res.label?.toUpperCase(),           col: lc(res.label) },
-              { label:"SCORE",    val: res.score?.toFixed(3),              col: "#eef2ff" },
-              { label:"COMPOUND", val: `${res.compound>=0?"+":""}${res.compound?.toFixed(3)}`, col: res.compound>=0?"#69f0ae":"#ff5252" },
-              ...(res.positive!=null ? [
-                { label:"POS%", val:`${(res.positive*100).toFixed(1)}%`,  col:"#69f0ae" },
-                { label:"NEU%", val:`${(res.neutral*100).toFixed(1)}%`,   col:"#ffeb3b" },
-                { label:"NEG%", val:`${(res.negative*100).toFixed(1)}%`,  col:"#ff5252" },
-              ] : []),
+              { label:"LABEL",    val:res.label?.toUpperCase(),                            col:lc(res.label) },
+              { label:"SCORE",    val:res.score?.toFixed(3),                               col:C.text },
+              { label:"COMPOUND", val:`${res.compound>=0?"+":""}${res.compound?.toFixed(3)}`, col:res.compound>=0?C.green:C.red },
             ].map(({ label, val, col }) => (
               <div key={label}>
-                <div style={{ fontSize:10, color:"#5a6480", fontFamily:"monospace", marginBottom:4 }}>{label}</div>
-                <div style={{ fontSize:16, fontWeight:700, color:col, fontFamily:"Space Mono,monospace" }}>{val}</div>
+                <Label>{label}</Label>
+                <Mono style={{ fontSize:18, fontWeight:700, color:col }}>{val}</Mono>
               </div>
             ))}
-            <div style={{ marginLeft:"auto", fontSize:10, color:"#3a4060", fontFamily:"monospace", alignSelf:"flex-end" }}>via {res.model}</div>
+            <Mono style={{ marginLeft:"auto", fontSize:10, color:C.dim }}>via {res.model}</Mono>
           </div>
         )}
       </div>
 
-      <div style={{ background:"#0d1117", border:"1px solid #1e2533", borderRadius:8, padding:20 }}>
-        <div style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace", marginBottom:14 }}>Scored Feed</div>
-        {(news ?? []).slice(0,15).map((item, i) => {
-          const s = item.sentiment; const col = lc(s?.label);
+      {/* Scored feed */}
+      <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
+        <div style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}` }}>
+          <Label>Recent scored headlines</Label>
+        </div>
+        {(news ?? []).slice(0,20).map((item, i) => {
+          const s   = item.sentiment;
+          const col = s?.label==="positive" ? C.green : s?.label==="negative" ? C.red : C.yellow;
           return (
-            <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", padding:"10px 0", borderBottom:"1px solid #0f1420" }}>
-              <div style={{ flex:1, paddingRight:16 }}>
-                <div style={{ fontSize:12, color:"#c8d0f0", lineHeight:1.5, marginBottom:5 }}>{item.headline}</div>
+            <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start",
+              padding:"10px 16px", borderBottom:`1px solid ${C.border}`, gap:16 }}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:12, color:C.text, lineHeight:1.5, marginBottom:4 }}>{item.headline}</div>
                 <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                  <Tag theme={item.theme} />
-                  <span style={{ fontSize:9, color:"#3a4060", fontFamily:"monospace" }}>{item.source} · {ago(item.published_at)}</span>
+                  <ThemeTag theme={item.theme} />
+                  <Mono style={{ fontSize:10, color:C.dim }}>{item.source} · {ago(item.published_at)}</Mono>
                 </div>
               </div>
-              <div style={{ textAlign:"right", minWidth:110 }}>
-                <div style={{ fontSize:13, fontWeight:700, color:col, fontFamily:"Space Mono,monospace" }}>
-                  {s?.compound>=0?"+":""}{s?.compound?.toFixed(3)}
+              <div style={{ textAlign:"right", minWidth:80 }}>
+                <Mono style={{ fontSize:13, fontWeight:700, color:col }}>
+                  {s?.compound>=0?"+":""}{s?.compound?.toFixed(2)}
+                </Mono>
+                <div style={{ fontSize:9, color:col, textTransform:"uppercase", marginTop:2, fontFamily:"'IBM Plex Mono',monospace" }}>
+                  {s?.label}
                 </div>
-                <div style={{ fontSize:9, color:col, fontFamily:"monospace", textTransform:"uppercase", marginTop:2 }}>{s?.label}</div>
-                <div style={{ marginTop:4, width:80, marginLeft:"auto" }}><SentBar score={s?.score} /></div>
               </div>
             </div>
           );
         })}
       </div>
-    </>
+    </div>
   );
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
+// ── Main app ──────────────────────────────────────────────────────────────────
 export default function ThesisDashboard() {
-  const [tab,        setTab]        = useState("overview");
-  const [themeFilter,setThemeFilter]= useState(null);
-  const [newsFilter, setNewsFilter] = useState("All");
-  const [period,     setPeriod]     = useState("3y");
-  const [now,        setNow]        = useState(new Date());
-  const [online,     setOnline]     = useState(null);
+  const [tab,         setTab]         = useState("overview");
+  const [themeFilter, setThemeFilter] = useState(null);
+  const [newsFilter,  setNewsFilter]  = useState("All");
+  const [period,      setPeriod]      = useState("3y");
+  const [now,         setNow]         = useState(new Date());
+  const [online,      setOnline]      = useState(null);
 
-  // live data
-  const pf   = useApi("/api/portfolio",              60_000);
-  const px   = useApi("/api/prices",                 60_000);
-  const feed = useApi("/api/news?limit=2000",          300_000);
-  const attr = useApi(`/api/attribution?period=${period}`, null);
+  const pf      = useApi("/api/portfolio",           60_000);
+  const px      = useApi("/api/prices",              60_000);
+  const feed    = useApi("/api/news?limit=2000",     300_000);
+  const attr    = useApi(`/api/attribution?period=${period}`, null);
+  const signals = useApi("/api/signals",             3_600_000);
 
-  useEffect(() => { attr.refetch(); }, [period]);
+  useEffect(() => { attr.refetch?.(); }, [period]);
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
   useEffect(() => {
     fetch(`${API}/api/portfolio`).then(r => setOnline(r.ok)).catch(() => setOnline(false));
   }, []);
 
-  // derived
   const portfolio  = pf.data;
   const prices     = px.data    ?? {};
   const news       = feed.data  ?? [];
   const attrData   = attr.data  ?? {};
+  const signalData = signals.data ?? { themes:{}, tickers:{} };
   const timeline   = portfolio?.timeline ?? [];
+  const totalVal   = portfolio?.total_value  ?? 0;
+  const totalRet   = portfolio?.total_return ?? 0;
 
-  const totalVal = portfolio?.total_value  ?? 0;
-  const totalRet = portfolio?.total_return ?? 0;
-
-  // ticker → mean sentiment from news
+  // Ticker sentiment from news
   const tkSent = {};
   news.forEach(a => (a.tickers ?? []).forEach(tk => {
-    tkSent[tk] = tkSent[tk] ?? []; tkSent[tk].push(a.sentiment?.score ?? 0.5);
+    tkSent[tk] = tkSent[tk] ?? [];
+    tkSent[tk].push(a.sentiment?.score ?? 0.5);
   }));
-  const avgSent = Object.fromEntries(Object.entries(tkSent).map(([k,v]) => [k, v.reduce((a,b)=>a+b,0)/v.length]));
+  const avgSent = Object.fromEntries(
+    Object.entries(tkSent).map(([k,v]) => [k, v.reduce((a,b)=>a+b,0)/v.length])
+  );
   const globalSent = Object.values(avgSent).length
-    ? (Object.values(avgSent).reduce((a,b)=>a+b,0) / Object.values(avgSent).length).toFixed(2)
+    ? (Object.values(avgSent).reduce((a,b)=>a+b,0)/Object.values(avgSent).length).toFixed(2)
     : "—";
 
   const attrRows = Object.entries(attrData)
@@ -258,129 +544,197 @@ export default function ThesisDashboard() {
     setTimeout(() => { pf.refetch(); px.refetch(); feed.refetch(); }, 2000);
   };
 
-  const NavBtn = ({ id, label }) => (
-    <button className="tab-btn" onClick={() => setTab(id)} style={{
-      padding:"5px 12px", borderRadius:4, fontSize:12, fontWeight:500,
-      color: tab===id ? "#00e5ff" : "#5a6480",
-      background: tab===id ? "#00e5ff14" : "transparent",
-      border: tab===id ? "1px solid #00e5ff30" : "1px solid transparent",
-      textTransform:"capitalize", letterSpacing:"0.02em",
+  // Shared nav button
+  const Tab = ({ id, label }) => (
+    <button onClick={() => setTab(id)} style={{
+      padding:"5px 12px", border:"none", cursor:"pointer", fontSize:11,
+      fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.06em", fontWeight:600,
+      color: tab===id ? C.accent : C.muted,
+      background: "transparent",
+      borderBottom: tab===id ? `2px solid ${C.accent}` : "2px solid transparent",
+      transition:"all 0.1s",
     }}>{label}</button>
   );
 
   return (
-    <div style={{ minHeight:"100vh", background:"#080c12", color:"#eef2ff", fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13 }}>
+    <div style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'IBM Plex Sans',system-ui,sans-serif", fontSize:13, lineHeight:1.5 }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
-        ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:#080c12} ::-webkit-scrollbar-thumb{background:#1e2533;border-radius:2px}
-        .tab-btn{background:none;border:none;cursor:pointer;transition:all .15s} .tab-btn:hover{opacity:.85}
-        .tr:hover{background:#111622!important} .nc:hover{border-color:#2a3050!important;background:#0f1420!important}
-        .tc{transition:all .2s;cursor:pointer} .tc:hover{transform:translateY(-1px)}
-        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @keyframes spin{to{transform:rotate(360deg)}}
+        ::-webkit-scrollbar{width:4px;height:4px}
+        ::-webkit-scrollbar-track{background:${C.bg}}
+        ::-webkit-scrollbar-thumb{background:${C.border2};border-radius:2px}
+        button{font-family:inherit}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
       `}</style>
 
+      {/* Offline banner */}
       {online === false && (
-        <div style={{ background:"#ff6d0018", borderBottom:"1px solid #ff6d0040", padding:"8px 32px" }}>
-          <span style={{ color:"#ff9800", fontSize:12, fontFamily:"monospace" }}>
-            ⚠ Backend unreachable — demo data shown. Start with:{" "}
-            <code style={{ background:"#1a1f2e", padding:"1px 8px", borderRadius:3 }}>uvicorn main:app --port 8000</code>
-          </span>
+        <div style={{ background:"#1a1100", borderBottom:`1px solid #f0b42940`, padding:"7px 24px" }}>
+          <Mono style={{ fontSize:11, color:C.accent }}>
+            ⚠ Backend offline. Run: uvicorn main:app --port 8000
+          </Mono>
         </div>
       )}
 
       {/* Header */}
-      <header style={{ borderBottom:"1px solid #1e2533", padding:"0 32px", display:"flex", alignItems:"center", justifyContent:"space-between", height:56, background:"#0d1117" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-          <div style={{ width:28, height:28, borderRadius:6, background:"linear-gradient(135deg,#00e5ff,#0097a7)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:900 }}>◈</div>
-          <span style={{ fontWeight:700, fontSize:15, letterSpacing:"-0.01em" }}>THESIS</span>
-          <span style={{ color:"#1e2533", fontSize:18 }}>|</span>
-          <span style={{ color:"#5a6480", fontSize:12, fontFamily:"monospace" }}>Thematic Portfolio Intelligence</span>
+      <header style={{ background:C.surface, borderBottom:`1px solid ${C.border}`, padding:"0 24px",
+        display:"flex", alignItems:"stretch", justifyContent:"space-between", height:48 }}>
+        {/* Logo */}
+        <div style={{ display:"flex", alignItems:"center", gap:12, borderRight:`1px solid ${C.border}`, paddingRight:16, marginRight:4 }}>
+          <div style={{ width:24, height:24, background:C.accent, display:"flex", alignItems:"center",
+            justifyContent:"center", fontSize:11, fontWeight:900, color:C.bg, borderRadius:2,
+            fontFamily:"'IBM Plex Mono',monospace" }}>T</div>
+          <Mono style={{ fontWeight:700, fontSize:13, letterSpacing:"0.05em" }}>THESIS</Mono>
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-          <div style={{ display:"flex", gap:4 }}>
-            {[["overview","Overview"],["themes","Themes"],["news","News"],["attribution","Attribution"],["analyzer","Analyzer"]].map(([id,l])=><NavBtn key={id} id={id} label={l}/>)}
-          </div>
-          <button onClick={handleRefresh} style={{ background:"#1a1f2e", border:"1px solid #2a3050", borderRadius:4, padding:"4px 10px", color:"#5a6480", fontSize:11, cursor:"pointer", fontFamily:"monospace" }}>↻</button>
+
+        {/* Nav tabs */}
+        <nav style={{ display:"flex", alignItems:"stretch", gap:0 }}>
+          {[["overview","OVERVIEW"],["themes","THEMES"],["news","NEWS"],["signals","SIGNALS"],["attribution","ATTRIBUTION"],["analyzer","ANALYZER"]].map(([id,l])=>
+            <Tab key={id} id={id} label={l} />
+          )}
+        </nav>
+
+        {/* Right controls */}
+        <div style={{ display:"flex", alignItems:"center", gap:12, marginLeft:"auto" }}>
+          <button onClick={handleRefresh} style={{ background:"none", border:`1px solid ${C.border2}`,
+            borderRadius:2, padding:"4px 10px", color:C.muted, fontSize:10,
+            cursor:"pointer", fontFamily:"'IBM Plex Mono',monospace" }}>↻ REFRESH</button>
           <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <div style={{ width:6, height:6, borderRadius:"50%", background:online===false?"#ff6d00":"#69f0ae", boxShadow:`0 0 6px ${online===false?"#ff6d00":"#69f0ae"}` }} />
-            <span style={{ fontSize:11, color:online===false?"#ff6d00":"#69f0ae", fontFamily:"monospace" }}>{online===false?"DEMO":"LIVE"}</span>
+            <div style={{ width:6, height:6, borderRadius:"50%",
+              background:online===false?C.red:C.green,
+              boxShadow:online===false?`0 0 4px ${C.red}`:`0 0 4px ${C.green}` }} />
+            <Mono style={{ fontSize:10, color:online===false?C.red:C.green }}>
+              {online===false?"OFFLINE":"LIVE"}
+            </Mono>
           </div>
-          <span style={{ fontSize:11, color:"#5a6480", fontFamily:"monospace" }}>{now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</span>
+          <Mono style={{ fontSize:10, color:C.dim }}>
+            {now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}
+          </Mono>
         </div>
       </header>
 
-      <main style={{ padding:"24px 32px", maxWidth:1400, margin:"0 auto" }}>
+      <main style={{ padding:"20px 24px", maxWidth:1440, margin:"0 auto" }}>
 
         {/* ══ OVERVIEW ══ */}
         {tab === "overview" && (<>
-          {pf.error && <Err msg={pf.error} retry={pf.refetch} />}
 
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:12, marginBottom:24 }}>
-            <StatCard label="Portfolio Value" value={f$(totalVal)}      sub="Paper trading"         accent="#00e5ff" loading={pf.loading} />
-            <StatCard label="Total Return"    value={fp(totalRet)}      sub="vs $15k basis"         accent="#69f0ae" loading={pf.loading} />
-            <StatCard label="Themes"          value={Object.keys(THEMES).length} sub={Object.keys(THEMES).map(t=>t.split(" ")[0]).join(" · ")} accent="#ff6d00" loading={false} />
-            <StatCard label="Tickers"         value={Object.keys(prices).length||15} sub="All themes" accent="#b39ddb" loading={px.loading} />
-            <StatCard label="Avg Sentiment"   value={globalSent}        sub="24h · NLP scored"         accent="#ffeb3b" loading={feed.loading} />
+          {/* Stats strip */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:1, marginBottom:16,
+            border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
+            {[
+              { label:"PORTFOLIO", value:pf.loading?null:f$(totalVal),     sub:"paper trading",           accent:C.accent },
+              { label:"RETURN",    value:pf.loading?null:fp(totalRet),      sub:"vs $15k cost basis",      accent:totalRet>=0?C.green:C.red },
+              { label:"THEMES",    value:Object.keys(THEMES).length,        sub:"investment buckets",      accent:C.muted },
+              { label:"TICKERS",   value:px.loading?null:Object.keys(prices).length||53, sub:"tracked positions", accent:C.muted },
+              { label:"SENTIMENT", value:feed.loading?null:globalSent,      sub:"24h avg compound",        accent:C.muted },
+              { label:"ARTICLES",  value:feed.loading?null:news.length,     sub:"scored today",            accent:C.muted },
+            ].map(({ label, value, sub, accent }) => (
+              <div key={label} style={{ padding:"14px 16px", background:C.surface }}>
+                <Label>{label}</Label>
+                {value == null
+                  ? <Skel h={22} w="60%" />
+                  : <Mono style={{ fontSize:20, fontWeight:700, color:accent, display:"block" }}>{value}</Mono>
+                }
+                <div style={{ fontSize:10, color:C.dim, marginTop:3 }}>{sub}</div>
+              </div>
+            ))}
           </div>
 
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 300px", gap:16, marginBottom:16 }}>
-            <div style={{ background:"#0d1117", border:"1px solid #1e2533", borderRadius:8, padding:"20px 20px 12px" }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:20 }}>
+          {/* Signal cards — quick view */}
+          {Object.keys(signalData.themes).length > 0 && (
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8, marginBottom:16 }}>
+              {Object.entries(signalData.themes).map(([theme, sig]) => {
+                const cfg  = THEMES[theme] ?? { color:C.muted, short:"—" };
+                const col  = sig.signal==="BUY"?C.green:sig.signal==="REDUCE"?C.red:C.yellow;
+                const prob = Math.round(sig.outperform_prob*100);
+                return (
+                  <div key={theme} onClick={() => setTab("signals")}
+                    style={{ padding:"10px 14px", background:C.surface, border:`1px solid ${C.border}`,
+                      borderRadius:4, borderTop:`2px solid ${col}`, cursor:"pointer" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                      <Mono style={{ fontSize:10, color:cfg.color }}>{cfg.short}</Mono>
+                      <SigBadge signal={sig.signal} />
+                    </div>
+                    <Mono style={{ fontSize:18, fontWeight:700, color:col }}>{prob}%</Mono>
+                    <ProbBar prob={sig.outperform_prob} color={col} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Chart + theme cards */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 280px", gap:12, marginBottom:12 }}>
+            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, padding:"16px 16px 8px" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
                 <div>
-                  <div style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace", marginBottom:4 }}>Performance by Theme</div>
-                  <div style={{ fontSize:12, color:"#3a4060" }}>{timeline.length ? (() => { try { const s=new Date(timeline[0]?.date); const e=new Date(timeline.at(-1)?.date); return `${s.toLocaleDateString("en-US",{month:"short",year:"numeric"})} → ${e.toLocaleDateString("en-US",{month:"short",year:"numeric"})}`; } catch(x){ return timeline[0]?.date+" → "+timeline.at(-1)?.date; } })() : "…"}</div>
+                  <div style={{ fontSize:12, fontWeight:600, marginBottom:2 }}>Performance by theme</div>
+                  <Mono style={{ fontSize:10, color:C.muted }}>
+                    {timeline.length ? `${fmtDate(timeline[0]?.date)} – ${fmtDate(timeline.at(-1)?.date)}` : "Loading…"}
+                  </Mono>
                 </div>
                 <div style={{ display:"flex", gap:12 }}>
                   {Object.entries(THEMES).map(([n,c])=>(
-                    <div key={n} style={{ display:"flex", alignItems:"center", gap:5 }}>
-                      <div style={{ width:8, height:2, background:c.color, borderRadius:1 }} />
-                      <span style={{ fontSize:10, color:"#5a6480" }}>{n.split(" ")[0]}</span>
+                    <div key={n} style={{ display:"flex", alignItems:"center", gap:4 }}>
+                      <div style={{ width:6, height:6, borderRadius:1, background:c.color }} />
+                      <Mono style={{ fontSize:9, color:C.muted }}>{c.short}</Mono>
                     </div>
                   ))}
                 </div>
               </div>
-              {pf.loading ? <Spinner /> : (
-                <ResponsiveContainer width="100%" height={260}>
-                  <AreaChart data={timeline} margin={{ top:0, right:4, left:-10, bottom:0 }}>
+              {pf.loading ? (
+                <div style={{ height:220, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <Mono style={{ fontSize:11, color:C.dim }}>Loading price history…</Mono>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={220}>
+                  <AreaChart data={timeline} margin={{ top:0, right:0, left:-20, bottom:0 }}>
                     <defs>{Object.entries(THEMES).map(([n,c])=>(
-                      <linearGradient key={n} id={`g${n.replace(/\s/g,"")}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor={c.color} stopOpacity={0.15}/>
-                        <stop offset="95%" stopColor={c.color} stopOpacity={0}/>
+                      <linearGradient key={n} id={`a${n.replace(/\W/g,"")}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%"   stopColor={c.color} stopOpacity={0.12}/>
+                        <stop offset="100%" stopColor={c.color} stopOpacity={0}/>
                       </linearGradient>
                     ))}</defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1a1f2e" vertical={false}/>
-                    <XAxis dataKey="date" tick={{ fill:"#3a4060", fontSize:10, fontFamily:"monospace" }} axisLine={false} tickLine={false} tickFormatter={d=>{ if(!d) return ''; try { const dt=new Date(d); return isNaN(dt)?d.slice(5):(dt.toLocaleDateString('en-US',{month:'short',day:'numeric'})); } catch(e){ return d.slice(5); } }} interval="preserveStartEnd"/>
-                    <YAxis tick={{ fill:"#3a4060", fontSize:10, fontFamily:"monospace" }} axisLine={false} tickLine={false} tickFormatter={v=>f$(v)}/>
+                    <CartesianGrid strokeDasharray="2 4" stroke={C.border} vertical={false}/>
+                    <XAxis dataKey="date" tick={{ fill:C.dim, fontSize:9, fontFamily:"'IBM Plex Mono',monospace" }}
+                      axisLine={false} tickLine={false} tickFormatter={fmtDate} interval="preserveStartEnd"/>
+                    <YAxis tick={{ fill:C.dim, fontSize:9, fontFamily:"'IBM Plex Mono',monospace" }}
+                      axisLine={false} tickLine={false} tickFormatter={v=>f$(v)}/>
                     <Tooltip content={<ChartTip/>}/>
                     {Object.entries(THEMES).map(([n,c])=>(
-                      <Area key={n} type="monotone" dataKey={n} stroke={c.color} strokeWidth={2} fill={`url(#g${n.replace(/\s/g,"")})`} dot={false} activeDot={{ r:4, fill:c.color }}/>
+                      <Area key={n} type="monotone" dataKey={n} stroke={c.color} strokeWidth={1.5}
+                        fill={`url(#a${n.replace(/\W/g,"")})`} dot={false} activeDot={{ r:3, fill:c.color }}/>
                     ))}
                   </AreaChart>
                 </ResponsiveContainer>
               )}
             </div>
 
-            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-              {Object.entries(THEMES).map(([name,cfg])=>{
-                const t = portfolio?.themes?.[name];
+            {/* Theme cards */}
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {Object.entries(THEMES).map(([name, cfg]) => {
+                const t    = portfolio?.themes?.[name];
+                const ret  = t?.return_pct ?? 0;
+                const tl   = timeline.map(row => ({ total: row[name] ?? 0 }));
                 return (
-                  <div key={name} className="tc" onClick={()=>{ setThemeFilter(name); setTab("themes"); }}
-                    style={{ background:"#0d1117", border:`1px solid ${themeFilter===name?cfg.color:"#1e2533"}`, borderRadius:8, padding:"14px 16px", flex:1 }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
-                      <div>
-                        <div style={{ fontSize:10, color:cfg.color, fontFamily:"monospace", letterSpacing:"0.08em", marginBottom:3 }}>{cfg.icon} {name.toUpperCase()}</div>
-                        {pf.loading ? <Skel h={24} w={80}/> : <div style={{ fontFamily:"Space Mono,monospace", fontSize:18, fontWeight:700 }}>{f$(t?.current_value)}</div>}
-                      </div>
-                      <div style={{ textAlign:"right" }}>
-                        {pf.loading ? <Skel h={16} w={50}/> : <div style={{ fontSize:13, fontWeight:700, color:(t?.return_pct??0)>=0?"#69f0ae":"#ff5252", fontFamily:"monospace" }}>{fp(t?.return_pct)}</div>}
-                        <div style={{ fontSize:10, color:"#3a4060", marginTop:2 }}>{t?.allocation_pct}% alloc</div>
-                      </div>
+                  <div key={name} onClick={() => { setThemeFilter(name); setTab("themes"); }}
+                    style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4,
+                      padding:"10px 12px", cursor:"pointer", flex:1,
+                      borderLeft:`3px solid ${cfg.color}` }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:4 }}>
+                      <Mono style={{ fontSize:10, color:cfg.color }}>{cfg.short}</Mono>
+                      {pf.loading
+                        ? <Skel h={14} w={40}/>
+                        : <Mono style={{ fontSize:12, fontWeight:700, color:ret>=0?C.green:C.red }}>{fp(ret)}</Mono>
+                      }
                     </div>
-                    <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
-                      {(t?.tickers??[]).map(tk=>(
-                        <span key={tk} style={{ fontSize:9, padding:"2px 5px", borderRadius:2, background:cfg.color+"14", color:cfg.color+"cc", fontFamily:"monospace", border:`1px solid ${cfg.color}25` }}>{tk}</span>
-                      ))}
+                    {pf.loading
+                      ? <Skel h={18} w={60}/>
+                      : <Mono style={{ fontSize:16, fontWeight:700, color:C.text }}>{f$(t?.current_value)}</Mono>
+                    }
+                    <div style={{ marginTop:6 }}>
+                      <MiniChart data={tl} color={cfg.color} />
                     </div>
                   </div>
                 );
@@ -388,41 +742,61 @@ export default function ThesisDashboard() {
             </div>
           </div>
 
-          {/* Ticker table */}
-          <div style={{ background:"#0d1117", border:"1px solid #1e2533", borderRadius:8, overflow:"hidden" }}>
-            <div style={{ padding:"14px 20px", borderBottom:"1px solid #1e2533", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <span style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace" }}>Position Monitor</span>
-              <span style={{ fontSize:10, color:"#3a4060", fontFamily:"monospace" }}>{px.updated ? `Updated ${ago(px.updated)}` : "Prices delayed"} · Sentiment: NLP</span>
+          {/* Position monitor table */}
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
+            <div style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between" }}>
+              <div style={{ fontSize:12, fontWeight:600 }}>Positions</div>
+              <Mono style={{ fontSize:10, color:C.dim }}>
+                {px.updated ? `prices ${ago(px.updated)} ago` : "loading…"} · sentiment from news NLP
+              </Mono>
             </div>
             <table style={{ width:"100%", borderCollapse:"collapse" }}>
               <thead>
-                <tr style={{ borderBottom:"1px solid #1e2533" }}>
-                  {["Ticker","Theme","Price","Chg%","Sentiment","Weight"].map(h=>(
-                    <th key={h} style={{ padding:"8px 20px", textAlign:"left", fontSize:10, color:"#3a4060", fontFamily:"monospace", letterSpacing:"0.08em", fontWeight:400 }}>{h}</th>
+                <tr style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {["Ticker","Theme","Price","Day","20d","Sentiment","Weight"].map(h=>(
+                    <th key={h} style={{ padding:"7px 16px", textAlign:"left", fontSize:9, color:C.dim,
+                      fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.08em", fontWeight:400 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {Object.entries(THEMES).flatMap(([theme,cfg])=>
                   (portfolio?.themes?.[theme]?.tickers??[]).map(tk=>{
-                    const p = prices[tk]; const pos = (p?.change_pct??0)>=0;
+                    const p    = prices[tk];
+                    const pos  = (p?.change_pct ?? 0) >= 0;
                     const sent = avgSent[tk];
-                    const alloc = portfolio?.themes?.[theme]?.allocation_pct??0;
-                    const w = alloc / (portfolio?.themes?.[theme]?.tickers?.length??1);
+                    const alloc = portfolio?.themes?.[theme]?.allocation_pct ?? 0;
+                    const w    = alloc / (portfolio?.themes?.[theme]?.tickers?.length ?? 1);
+                    // 20d momentum from price history — approx from change_pct
+                    const sigData = signalData.tickers?.[tk];
                     return (
-                      <tr key={tk} className="tr" style={{ borderBottom:"1px solid #0f1420", background:"transparent" }}>
-                        <td style={{ padding:"9px 20px", fontFamily:"Space Mono,monospace", fontWeight:700, fontSize:13, color:cfg.color }}>{tk}</td>
-                        <td style={{ padding:"9px 20px" }}><Tag theme={theme}/></td>
-                        <td style={{ padding:"9px 20px", fontFamily:"monospace", fontSize:12 }}>{px.loading?<Skel h={14} w={60}/>:p?`$${p.price.toFixed(2)}`:"—"}</td>
-                        <td style={{ padding:"9px 20px", fontFamily:"monospace", fontSize:12, color:pos?"#69f0ae":"#ff5252" }}>{px.loading?<Skel h={14} w={40}/>:p?fp(p.change_pct):"—"}</td>
-                        <td style={{ padding:"9px 20px", width:180 }}>{feed.loading?<Skel h={4}/>:<SentBar score={sent}/>}</td>
-                        <td style={{ padding:"9px 20px", fontFamily:"monospace", fontSize:11, color:"#5a6480" }}>
-                          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                            <div style={{ width:60, height:3, background:"#1a1f2e", borderRadius:2 }}>
-                              <div style={{ width:`${Math.min((w/15)*100,100)}%`, height:"100%", background:cfg.color, borderRadius:2 }}/>
-                            </div>
-                            <span>{w.toFixed(1)}%</span>
-                          </div>
+                      <tr key={tk} style={{ borderBottom:`1px solid ${C.border}` }}
+                        onMouseEnter={e=>e.currentTarget.style.background=C.border}
+                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                        <td style={{ padding:"8px 16px" }}>
+                          <Mono style={{ fontSize:13, fontWeight:700, color:cfg.color }}>{tk}</Mono>
+                        </td>
+                        <td style={{ padding:"8px 16px" }}><ThemeTag theme={theme}/></td>
+                        <td style={{ padding:"8px 16px" }}>
+                          {px.loading ? <Skel h={12} w={50}/> : <Mono style={{ fontSize:12 }}>{p?`$${p.price.toFixed(2)}`:"—"}</Mono>}
+                        </td>
+                        <td style={{ padding:"8px 16px" }}>
+                          {px.loading ? <Skel h={12} w={40}/> : (
+                            <Mono style={{ fontSize:12, color:pos?C.green:C.red }}>
+                              {p?fp(p.change_pct):"—"}
+                            </Mono>
+                          )}
+                        </td>
+                        <td style={{ padding:"8px 16px" }}>
+                          {sigData ? (
+                            <SigBadge signal={sigData.signal} />
+                          ) : <Mono style={{ fontSize:10, color:C.dim }}>—</Mono>}
+                        </td>
+                        <td style={{ padding:"8px 16px", width:140 }}>
+                          {feed.loading ? <Skel h={3}/> : <SentBar score={sent}/>}
+                        </td>
+                        <td style={{ padding:"8px 16px" }}>
+                          <Mono style={{ fontSize:10, color:C.muted }}>{w.toFixed(1)}%</Mono>
                         </td>
                       </tr>
                     );
@@ -436,43 +810,70 @@ export default function ThesisDashboard() {
         {/* ══ THEMES ══ */}
         {tab === "themes" && (
           <div>
-            <div style={{ display:"flex", gap:8, marginBottom:20 }}>
-              <button className="tab-btn" onClick={()=>setThemeFilter(null)} style={{ padding:"7px 14px", borderRadius:4, fontSize:12, color:!themeFilter?"#00e5ff":"#5a6480", background:!themeFilter?"#00e5ff18":"#0d1117", border:`1px solid ${!themeFilter?"#00e5ff40":"#1e2533"}`, fontFamily:"monospace" }}>All</button>
+            <div style={{ display:"flex", gap:6, marginBottom:16 }}>
+              <button onClick={()=>setThemeFilter(null)} style={{
+                padding:"4px 12px", borderRadius:2, fontSize:10, cursor:"pointer",
+                fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.06em",
+                color:!themeFilter?C.bg:C.muted,
+                background:!themeFilter?C.accent:"transparent",
+                border:`1px solid ${!themeFilter?C.accent:C.border}`,
+              }}>ALL</button>
               {Object.entries(THEMES).map(([n,c])=>(
-                <button key={n} className="tab-btn" onClick={()=>setThemeFilter(n===themeFilter?null:n)} style={{ padding:"7px 14px", borderRadius:4, fontSize:12, color:themeFilter===n?c.color:"#5a6480", background:themeFilter===n?c.color+"18":"#0d1117", border:`1px solid ${themeFilter===n?c.color+"50":"#1e2533"}`, fontFamily:"monospace" }}>
-                  {c.icon} {n}
-                </button>
+                <button key={n} onClick={()=>setThemeFilter(n===themeFilter?null:n)} style={{
+                  padding:"4px 12px", borderRadius:2, fontSize:10, cursor:"pointer",
+                  fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.06em",
+                  color:themeFilter===n?C.bg:C.muted,
+                  background:themeFilter===n?c.color:"transparent",
+                  border:`1px solid ${themeFilter===n?c.color:C.border}`,
+                }}>{c.short}</button>
               ))}
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:16 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12 }}>
               {(themeFilter?[[themeFilter,THEMES[themeFilter]]]:Object.entries(THEMES)).map(([name,cfg])=>{
                 const t = portfolio?.themes?.[name];
                 return (
-                  <div key={name} style={{ background:"#0d1117", border:`1px solid ${cfg.color}30`, borderRadius:8, overflow:"hidden" }}>
-                    <div style={{ padding:"16px 20px", borderBottom:`1px solid ${cfg.color}20`, background:cfg.color+"08" }}>
-                      <div style={{ fontSize:18, marginBottom:4 }}>{cfg.icon}</div>
-                      <div style={{ fontSize:14, fontWeight:700, color:cfg.color, marginBottom:4 }}>{name}</div>
-                      <div style={{ fontSize:11, color:"#5a6480", lineHeight:1.5, marginBottom:t?12:0 }}>{cfg.description}</div>
+                  <div key={name} style={{ background:C.surface, border:`1px solid ${C.border}`,
+                    borderRadius:4, overflow:"hidden" }}>
+                    <div style={{ padding:"14px 16px", borderBottom:`1px solid ${C.border}`,
+                      borderLeft:`4px solid ${cfg.color}` }}>
+                      <Mono style={{ fontSize:11, color:cfg.color, marginBottom:6 }}>{name.toUpperCase()}</Mono>
                       {t && (
-                        <div style={{ display:"flex", gap:16 }}>
-                          <div><div style={{ fontSize:10, color:"#3a4060", fontFamily:"monospace" }}>VALUE</div><div style={{ fontSize:16, fontWeight:700, fontFamily:"Space Mono,monospace" }}>{f$(t.current_value)}</div></div>
-                          <div><div style={{ fontSize:10, color:"#3a4060", fontFamily:"monospace" }}>RETURN</div><div style={{ fontSize:16, fontWeight:700, color:t.return_pct>=0?"#69f0ae":"#ff5252", fontFamily:"Space Mono,monospace" }}>{fp(t.return_pct)}</div></div>
+                        <div style={{ display:"flex", gap:20 }}>
+                          <div>
+                            <Label>VALUE</Label>
+                            <Mono style={{ fontSize:18, fontWeight:700 }}>{f$(t.current_value)}</Mono>
+                          </div>
+                          <div>
+                            <Label>RETURN</Label>
+                            <Mono style={{ fontSize:18, fontWeight:700, color:t.return_pct>=0?C.green:C.red }}>
+                              {fp(t.return_pct)}
+                            </Mono>
+                          </div>
+                          <div>
+                            <Label>ALLOC</Label>
+                            <Mono style={{ fontSize:18, fontWeight:700, color:C.muted }}>{t.allocation_pct}%</Mono>
+                          </div>
                         </div>
                       )}
                     </div>
-                    <div style={{ padding:16 }}>
-                      <div style={{ fontSize:10, color:"#5a6480", fontFamily:"monospace", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:10 }}>Holdings</div>
-                      {(t?.tickers??[]).map(tk=>{
-                        const p=prices[tk]; const pos=(p?.change_pct??0)>=0;
+                    <div style={{ padding:0 }}>
+                      {(t?.tickers??[]).map((tk,i)=>{
+                        const p    = prices[tk];
+                        const pos  = (p?.change_pct??0)>=0;
+                        const sent = avgSent[tk];
                         return (
-                          <div key={tk} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #0f1420" }}>
+                          <div key={tk} style={{ display:"flex", justifyContent:"space-between",
+                            alignItems:"center", padding:"9px 16px",
+                            borderBottom:i<(t?.tickers?.length??0)-1?`1px solid ${C.border}`:"none" }}>
                             <div style={{ flex:1 }}>
-                              <span style={{ fontFamily:"Space Mono,monospace", fontWeight:700, fontSize:13 }}>{tk}</span>
-                              <div style={{ marginTop:4, width:120 }}><SentBar score={avgSent[tk]}/></div>
+                              <Mono style={{ fontSize:13, fontWeight:700 }}>{tk}</Mono>
+                              <div style={{ marginTop:4, width:100 }}><SentBar score={sent}/></div>
                             </div>
                             <div style={{ textAlign:"right" }}>
-                              <div style={{ fontSize:12, fontFamily:"monospace" }}>{p?`$${p.price.toFixed(2)}`:"—"}</div>
-                              <div style={{ fontSize:11, color:pos?"#69f0ae":"#ff5252", fontFamily:"monospace" }}>{p?fp(p.change_pct):"—"}</div>
+                              <Mono style={{ fontSize:12 }}>{p?`$${p.price.toFixed(2)}`:"—"}</Mono>
+                              <Mono style={{ fontSize:11, color:pos?C.green:C.red, display:"block" }}>
+                                {p?fp(p.change_pct):"—"}
+                              </Mono>
                             </div>
                           </div>
                         );
@@ -488,124 +889,207 @@ export default function ThesisDashboard() {
         {/* ══ NEWS ══ */}
         {tab === "news" && (
           <div>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
-              <div style={{ display:"flex", gap:8 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={{ display:"flex", gap:6 }}>
                 {["All",...Object.keys(THEMES)].map(f=>(
-                  <button key={f} className="tab-btn" onClick={()=>setNewsFilter(f)} style={{ padding:"6px 14px", borderRadius:4, fontSize:11, color:newsFilter===f?"#00e5ff":"#5a6480", background:newsFilter===f?"#00e5ff14":"#0d1117", border:`1px solid ${newsFilter===f?"#00e5ff30":"#1e2533"}`, fontFamily:"monospace" }}>
-                    {f==="All"?"All Themes":THEMES[f].icon+" "+f}
-                  </button>
+                  <button key={f} onClick={()=>setNewsFilter(f)} style={{
+                    padding:"4px 10px", borderRadius:2, fontSize:10, cursor:"pointer",
+                    fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.06em",
+                    color:newsFilter===f?C.bg:C.muted,
+                    background:newsFilter===f?C.accent:"transparent",
+                    border:`1px solid ${newsFilter===f?C.accent:C.border}`,
+                  }}>{f==="All"?"ALL":THEMES[f].short}</button>
                 ))}
               </div>
-              <span style={{ fontSize:11, color:"#3a4060", fontFamily:"monospace" }}>{filtNews.length} articles · {feed.updated?ago(feed.updated):""}</span>
+              <Mono style={{ fontSize:10, color:C.dim }}>
+                {filtNews.length} articles
+                {feed.updated ? ` · updated ${ago(feed.updated)} ago` : ""}
+              </Mono>
             </div>
-            {feed.error && <Err msg={feed.error} retry={feed.refetch}/>}
-            {feed.loading
-              ? [...Array(5)].map((_,i)=><div key={i} style={{ background:"#0d1117", border:"1px solid #1e2533", borderRadius:8, padding:"16px 20px", marginBottom:10 }}><Skel h={12} w="30%"/><div style={{height:8}}/><Skel h={16} w="90%"/></div>)
-              : filtNews.length === 0
-                ? <div style={{ padding:40, textAlign:"center", color:"#3a4060", fontFamily:"monospace" }}>No articles — set NewsAPI key in config.py</div>
-                : filtNews.map((item,i)=>{
-                    const cfg=THEMES[item.theme]??{color:"#aaa"}; const s=item.sentiment;
-                    const pos=(s?.compound??0)>=0;
-                    return (
-                      <a key={i} href={item.url} target="_blank" rel="noopener noreferrer" style={{ textDecoration:"none", display:"block", marginBottom:10 }}>
-                        <div className="nc" style={{ background:"#0d1117", border:"1px solid #1e2533", borderRadius:8, padding:"16px 20px", display:"grid", gridTemplateColumns:"1fr auto", gap:16, alignItems:"center" }}>
-                          <div>
-                            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-                              <Tag theme={item.theme}/>
-                              {(item.tickers??[]).slice(0,3).map(tk=><span key={tk} style={{ fontFamily:"monospace", fontSize:11, color:cfg.color, fontWeight:700 }}>{tk}</span>)}
-                              <span style={{ fontSize:10, color:"#3a4060" }}>· {item.source} · {ago(item.published_at)}</span>
-                            </div>
-                            <div style={{ fontSize:13, color:"#c8d0f0", lineHeight:1.5, marginBottom:10, fontWeight:500 }}>{item.headline}</div>
-                            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-                              <span style={{ fontSize:10, color:"#5a6480", fontFamily:"monospace" }}>SENTIMENT</span>
-                              <div style={{ width:80 }}><SentBar score={s?.score}/></div>
-                              {s?.model && <span style={{ fontSize:9, color:"#2a3050", fontFamily:"monospace" }}>via {s.model}</span>}
-                            </div>
+
+            {feed.loading ? (
+              <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
+                {[...Array(8)].map((_,i)=>(
+                  <div key={i} style={{ background:C.surface, border:`1px solid ${C.border}`,
+                    borderRadius:4, padding:"12px 16px" }}>
+                    <Skel h={12} w="30%"/><div style={{height:6}}/>
+                    <Skel h={14} w="85%"/>
+                  </div>
+                ))}
+              </div>
+            ) : filtNews.length === 0 ? (
+              <Mono style={{ fontSize:12, color:C.dim, padding:40, textAlign:"center", display:"block" }}>
+                No articles found.
+              </Mono>
+            ) : (
+              <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
+                {filtNews.map((item, i) => {
+                  const cfg = THEMES[item.theme] ?? { color:C.muted };
+                  const s   = item.sentiment;
+                  const pos = (s?.compound ?? 0) >= 0;
+                  return (
+                    <a key={i} href={item.url} target="_blank" rel="noopener noreferrer"
+                      style={{ textDecoration:"none", display:"block" }}>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 100px",
+                        padding:"11px 16px", borderBottom:`1px solid ${C.border}`,
+                        gap:16, alignItems:"center" }}
+                        onMouseEnter={e=>e.currentTarget.style.background=C.border}
+                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                        <div>
+                          <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:5 }}>
+                            <ThemeTag theme={item.theme}/>
+                            <Mono style={{ fontSize:10, color:C.dim }}>
+                              {item.source} · {ago(item.published_at)}
+                            </Mono>
                           </div>
-                          <div style={{ textAlign:"right", minWidth:70 }}>
-                            <div style={{ fontSize:15, fontWeight:700, color:pos?"#69f0ae":"#ff5252", fontFamily:"Space Mono,monospace" }}>{pos?"+":""}{s?.compound?.toFixed(2)}</div>
-                            <div style={{ fontSize:9, color:pos?"#69f0ae":"#ff5252", fontFamily:"monospace", textTransform:"uppercase", marginTop:3 }}>{s?.label}</div>
+                          <div style={{ fontSize:12, color:C.text, lineHeight:1.5, marginBottom:6 }}>
+                            {item.headline}
+                          </div>
+                          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                            <Mono style={{ fontSize:9, color:C.dim }}>SENT</Mono>
+                            <div style={{ width:80 }}><SentBar score={s?.score}/></div>
+                            {s?.model && <Mono style={{ fontSize:9, color:C.dim }}>via {s.model}</Mono>}
                           </div>
                         </div>
-                      </a>
-                    );
-                  })
-            }
+                        <div style={{ textAlign:"right" }}>
+                          <Mono style={{ fontSize:15, fontWeight:700, color:pos?C.green:C.red }}>
+                            {pos?"+":""}{s?.compound?.toFixed(2)}
+                          </Mono>
+                          <Mono style={{ fontSize:9, color:pos?C.green:C.red, display:"block",
+                            textTransform:"uppercase", marginTop:2 }}>{s?.label}</Mono>
+                        </div>
+                      </div>
+                    </a>
+                  );
+                })}
+              </div>
+            )}
           </div>
+        )}
+
+        {/* ══ SIGNALS ══ */}
+        {tab === "signals" && (
+          <SignalsTab signalData={signalData} signals={signals} />
         )}
 
         {/* ══ ATTRIBUTION ══ */}
         {tab === "attribution" && (
           <div>
-            <div style={{ display:"flex", gap:8, marginBottom:20 }}>
+            <div style={{ display:"flex", gap:6, marginBottom:16 }}>
               {PERIODS.map(p=>(
-                <button key={p} className="tab-btn" onClick={()=>setPeriod(p)} style={{ padding:"5px 14px", borderRadius:4, fontSize:11, color:period===p?"#00e5ff":"#5a6480", background:period===p?"#00e5ff14":"#0d1117", border:`1px solid ${period===p?"#00e5ff30":"#1e2533"}`, fontFamily:"monospace" }}>{p.toUpperCase()}</button>
+                <button key={p} onClick={()=>setPeriod(p)} style={{
+                  padding:"4px 10px", borderRadius:2, fontSize:10, cursor:"pointer",
+                  fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.06em",
+                  color:period===p?C.bg:C.muted,
+                  background:period===p?C.accent:"transparent",
+                  border:`1px solid ${period===p?C.accent:C.border}`,
+                }}>{p.toUpperCase()}</button>
               ))}
             </div>
-            {attr.error && <Err msg={attr.error} retry={attr.refetch}/>}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
-              <div style={{ background:"#0d1117", border:"1px solid #1e2533", borderRadius:8, padding:"20px 20px 12px" }}>
-                <div style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace", marginBottom:16 }}>Theme Returns vs SPY · {period.toUpperCase()}</div>
-                {attr.loading ? <Spinner/> : (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={attrRows} barGap={6} margin={{ top:0, right:0, left:-10, bottom:0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1a1f2e" vertical={false}/>
-                      <XAxis dataKey="name" tick={{ fill:"#3a4060", fontSize:10, fontFamily:"monospace" }} axisLine={false} tickLine={false} tickFormatter={n=>n.split(" ")[0]}/>
-                      <YAxis tick={{ fill:"#3a4060", fontSize:10, fontFamily:"monospace" }} axisLine={false} tickLine={false} tickFormatter={v=>`${v}%`}/>
-                      <Tooltip contentStyle={{ background:"#0d1117", border:"1px solid #1e2533", borderRadius:6, fontSize:11, fontFamily:"monospace" }} formatter={(v,n)=>[`${v?.toFixed(1)}%`, n==="return"?"Theme":"SPY"]}/>
-                      <Bar dataKey="return"    name="return"    radius={[3,3,0,0]}>{attrRows.map((_,i)=><Cell key={i} fill={Object.values(THEMES)[i]?.color??"#00e5ff"}/>)}</Bar>
-                      <Bar dataKey="benchmark" name="benchmark" fill="#1e2533" radius={[3,3,0,0]}/>
+
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+              <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, padding:"16px 16px 8px" }}>
+                <div style={{ fontSize:12, fontWeight:600, marginBottom:16 }}>Theme returns vs SPY · {period.toUpperCase()}</div>
+                {attr.loading ? (
+                  <div style={{ height:200, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    <Mono style={{ fontSize:11, color:C.dim }}>Loading…</Mono>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={attrRows} barGap={4} margin={{ top:0, right:0, left:-20, bottom:0 }}>
+                      <CartesianGrid strokeDasharray="2 4" stroke={C.border} vertical={false}/>
+                      <XAxis dataKey="name" tick={{ fill:C.dim, fontSize:9, fontFamily:"'IBM Plex Mono',monospace" }}
+                        axisLine={false} tickLine={false} tickFormatter={n=>THEMES[n]?.short??n.split(" ")[0]}/>
+                      <YAxis tick={{ fill:C.dim, fontSize:9, fontFamily:"'IBM Plex Mono',monospace" }}
+                        axisLine={false} tickLine={false} tickFormatter={v=>`${v}%`}/>
+                      <Tooltip contentStyle={{ background:C.surface, border:`1px solid ${C.border2}`,
+                        borderRadius:4, fontSize:10, fontFamily:"'IBM Plex Mono',monospace" }}
+                        formatter={(v,n)=>[`${v?.toFixed(1)}%`, n==="return"?"Theme":"SPY"]}/>
+                      <Bar dataKey="return" name="return" radius={[2,2,0,0]}>
+                        {attrRows.map((_,i)=><Cell key={i} fill={Object.values(THEMES)[i]?.color??C.accent}/>)}
+                      </Bar>
+                      <Bar dataKey="benchmark" name="benchmark" fill={C.border2} radius={[2,2,0,0]}/>
                     </BarChart>
                   </ResponsiveContainer>
                 )}
               </div>
-              <div style={{ background:"#0d1117", border:"1px solid #1e2533", borderRadius:8, padding:20 }}>
-                <div style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace", marginBottom:16 }}>Alpha Attribution</div>
-                {attr.loading ? [...Array(3)].map((_,i)=><div key={i} style={{marginBottom:18}}><Skel h={40}/></div>) :
-                  attrRows.map((row,i)=>{
-                    const cfg=Object.values(THEMES)[i]; const mx=Math.max(...attrRows.map(r=>r.return),1);
-                    return (
-                      <div key={row.name} style={{ marginBottom:18 }}>
-                        <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
-                          <span style={{ fontSize:12, color:cfg?.color, fontFamily:"monospace" }}>{row.name.split(" ")[0].toUpperCase()}</span>
-                          <div style={{ display:"flex", gap:14 }}>
-                            <span style={{ fontSize:11, color:"#5a6480", fontFamily:"monospace" }}>Return: <span style={{color:"#69f0ae"}}>{fp(row.return)}</span></span>
-                            <span style={{ fontSize:11, color:"#5a6480", fontFamily:"monospace" }}>α: <span style={{color:"#ffeb3b"}}>{fp(row.alpha)}</span></span>
-                          </div>
-                        </div>
-                        <div style={{ height:6, background:"#1a1f2e", borderRadius:3, position:"relative" }}>
-                          <div style={{ position:"absolute", width:`${(row.benchmark/mx)*100}%`, height:"100%", background:"#2a3050", borderRadius:3 }}/>
-                          <div style={{ position:"absolute", width:`${Math.min((row.return/mx)*100,100)}%`, height:"100%", background:cfg?.color, borderRadius:3, opacity:0.85 }}/>
+
+              <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, padding:16 }}>
+                <div style={{ fontSize:12, fontWeight:600, marginBottom:16 }}>Alpha by theme</div>
+                {attr.loading ? [...Array(3)].map((_,i)=>(
+                  <div key={i} style={{ marginBottom:16 }}><Skel h={36}/></div>
+                )) : attrRows.map((row,i)=>{
+                  const cfg = Object.values(THEMES)[i];
+                  const mx  = Math.max(...attrRows.map(r=>r.return), 1);
+                  return (
+                    <div key={row.name} style={{ marginBottom:16 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                        <Mono style={{ fontSize:11, color:cfg?.color }}>{THEMES[row.name]?.short ?? row.name.split(" ")[0]}</Mono>
+                        <div style={{ display:"flex", gap:16 }}>
+                          <Mono style={{ fontSize:11, color:C.muted }}>
+                            return <span style={{color:C.green}}>{fp(row.return)}</span>
+                          </Mono>
+                          <Mono style={{ fontSize:11, color:C.muted }}>
+                            α <span style={{color:C.accent}}>{fp(row.alpha)}</span>
+                          </Mono>
                         </div>
                       </div>
-                    );
-                  })
-                }
+                      <div style={{ height:5, background:C.border2, borderRadius:2, position:"relative" }}>
+                        <div style={{ position:"absolute", width:`${(row.benchmark/mx)*100}%`, height:"100%", background:C.dim, borderRadius:2 }}/>
+                        <div style={{ position:"absolute", width:`${Math.min((row.return/mx)*100,100)}%`, height:"100%", background:cfg?.color, borderRadius:2, opacity:0.85 }}/>
+                      </div>
+                    </div>
+                  );
+                })}
+
                 {attrData._portfolio && (
-                  <div style={{ marginTop:20, padding:"14px 16px", background:"#00e5ff08", border:"1px solid #00e5ff20", borderRadius:6 }}>
-                    <div style={{ fontSize:10, color:"#5a6480", fontFamily:"monospace", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:8 }}>Portfolio vs SPY · {period.toUpperCase()}</div>
-                    <div style={{ display:"flex", justifyContent:"space-between" }}>
-                      <div><div style={{ fontSize:20, fontWeight:800, color:"#69f0ae", fontFamily:"Space Mono,monospace" }}>{fp(attrData._portfolio.total_return)}</div><div style={{ fontSize:10, color:"#5a6480", marginTop:2 }}>THESIS</div></div>
-                      <div style={{textAlign:"right"}}><div style={{ fontSize:20, fontWeight:800, color:"#3a4060", fontFamily:"Space Mono,monospace" }}>{fp(attrData._portfolio.benchmark_return)}</div><div style={{ fontSize:10, color:"#5a6480", marginTop:2 }}>SPY</div></div>
-                      <div style={{textAlign:"right"}}><div style={{ fontSize:20, fontWeight:800, color:"#ffeb3b", fontFamily:"Space Mono,monospace" }}>{fp(attrData._portfolio.portfolio_alpha)}</div><div style={{ fontSize:10, color:"#5a6480", marginTop:2 }}>Alpha</div></div>
+                  <div style={{ marginTop:16, padding:"12px 14px", background:C.bg,
+                    border:`1px solid ${C.border2}`, borderRadius:3 }}>
+                    <Label>Portfolio vs SPY · {period.toUpperCase()}</Label>
+                    <div style={{ display:"flex", gap:24, marginTop:6 }}>
+                      <div>
+                        <Mono style={{ fontSize:18, fontWeight:700, color:C.green }}>
+                          {fp(attrData._portfolio.total_return)}
+                        </Mono>
+                        <Mono style={{ fontSize:9, color:C.dim, display:"block", marginTop:2 }}>THESIS</Mono>
+                      </div>
+                      <div>
+                        <Mono style={{ fontSize:18, fontWeight:700, color:C.dim }}>
+                          {fp(attrData._portfolio.benchmark_return)}
+                        </Mono>
+                        <Mono style={{ fontSize:9, color:C.dim, display:"block", marginTop:2 }}>SPY</Mono>
+                      </div>
+                      <div>
+                        <Mono style={{ fontSize:18, fontWeight:700, color:C.accent }}>
+                          {fp(attrData._portfolio.portfolio_alpha)}
+                        </Mono>
+                        <Mono style={{ fontSize:9, color:C.dim, display:"block", marginTop:2 }}>ALPHA</Mono>
+                      </div>
                     </div>
                   </div>
                 )}
               </div>
             </div>
+
             {/* Thesis journal */}
-            <div style={{ background:"#0d1117", border:"1px solid #1e2533", borderRadius:8, padding:20 }}>
-              <div style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace", marginBottom:14 }}>Thesis Journal</div>
+            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
+              <div style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}` }}>
+                <div style={{ fontSize:12, fontWeight:600 }}>Thesis journal</div>
+              </div>
               {[
-                { date:"Jan 2023", theme:"AI Infrastructure",         entry:"Initiating NVDA position. AI training compute demand will be structurally underestimated by market for 3-5 years. GPU scarcity analogous to picks-and-shovels. Adding MSFT, GOOGL, META as hyperscaler beneficiaries." },
-                { date:"Apr 2023", theme:"Defense",                   entry:"Adding LMT & RTX. Ukraine conflict reveals Western stockpile depletion; multi-year re-armament cycle ahead. Adding PLTR — AI battlefield analytics is a structural shift, not a cyclical contract." },
-                { date:"Sep 2024", theme:"Energy Transition",         entry:"Initiating nuclear basket (CEG, VST). AI data center power demand creates new demand base for always-on carbon-free baseload. Thesis: AI → energy scarcity → nuclear renaissance." },
-                { date:"Jan 2025", theme:"Biodefense & Pandemic",     entry:"Initiating biodefense basket. CDC flagging elevated hantavirus cases; rodent-borne hemorrhagic fever with ~38% CFR and no approved antiviral. mRNA platforms (MRNA, BNTX) can compress vaccine timelines from years to months. SIGA holds the only FDA-approved smallpox antiviral — strategic stockpile contract provides recurring revenue floor." },
-                { date:"Mar 2025", theme:"Healthcare Infrastructure", entry:"Adding diagnostics and lab infrastructure. TMO and DHR are picks-and-shovels for both pandemic response and genomics secular growth. ABT rapid-test infrastructure was stress-tested by COVID — positioned for next outbreak." },
+                { date:"Jan 2023", theme:"AI Infrastructure",         entry:"Initiated NVDA. AI training compute will be undersupplied for 3–5 years. GPU shortage = picks-and-shovels. Added MSFT, GOOGL, META as hyperscaler beneficiaries." },
+                { date:"Apr 2023", theme:"Defense",                   entry:"Added LMT, RTX. Ukraine conflict exposes Western stockpile depletion — multi-year re-armament cycle ahead. Added PLTR: AI battlefield analytics is structural, not a one-time contract." },
+                { date:"Sep 2024", theme:"Energy Transition",         entry:"Initiated nuclear basket (CEG, VST). AI data center power demand creates sustained need for carbon-free baseload. Thesis: AI → energy scarcity → nuclear." },
+                { date:"Jan 2025", theme:"Biodefense & Pandemic",     entry:"Initiated biodefense basket. CDC tracking elevated hantavirus. 38% CFR, no approved antiviral. mRNA platforms can cut vaccine development from years to months. SIGA holds the only FDA-approved smallpox antiviral." },
+                { date:"Mar 2025", theme:"Healthcare Infrastructure", entry:"Added TMO, DHR — lab infrastructure is picks-and-shovels for pandemic response and genomics. ABT rapid testing was proven at scale during COVID." },
               ].map((e,i,a)=>(
-                <div key={i} style={{ display:"flex", gap:16, marginBottom:16, paddingBottom:16, borderBottom:i<a.length-1?"1px solid #1a1f2e":"none" }}>
-                  <div style={{ minWidth:70, fontFamily:"monospace", fontSize:10, color:"#3a4060", paddingTop:2 }}>{e.date}</div>
-                  <div><div style={{ marginBottom:4 }}><Tag theme={e.theme}/></div><div style={{ fontSize:12, color:"#8892b0", lineHeight:1.6 }}>{e.entry}</div></div>
+                <div key={i} style={{ display:"flex", gap:16, padding:"12px 16px",
+                  borderBottom:i<a.length-1?`1px solid ${C.border}`:"none" }}>
+                  <Mono style={{ minWidth:72, fontSize:10, color:C.dim, paddingTop:1 }}>{e.date}</Mono>
+                  <div>
+                    <div style={{ marginBottom:5 }}><ThemeTag theme={e.theme}/></div>
+                    <div style={{ fontSize:12, color:C.muted, lineHeight:1.6 }}>{e.entry}</div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -613,12 +1097,7 @@ export default function ThesisDashboard() {
         )}
 
         {/* ══ ANALYZER ══ */}
-        {tab === "analyzer" && (
-          <div>
-            <div style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace", marginBottom:16 }}>Sentiment Workbench</div>
-            <Analyzer news={news}/>
-          </div>
-        )}
+        {tab === "analyzer" && <AnalyzerTab news={news} />}
 
       </main>
     </div>
