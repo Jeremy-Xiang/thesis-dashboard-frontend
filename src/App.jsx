@@ -69,12 +69,16 @@ const fp = v => v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 const ago = iso => {
   if (!iso) return "";
   try {
-    const s = (Date.now() - new Date(iso)) / 1000;
-    if (s < 0)     return "just now";
-    if (s < 60)    return "just now";
-    if (s < 3600)  return `${Math.round(s/60)}m`;
-    if (s < 86400) return `${Math.round(s/3600)}h`;
-    return `${Math.round(s/86400)}d`;
+    const dt = new Date(iso);
+    if (isNaN(dt)) return "";
+    const s = (Date.now() - dt) / 1000;
+    if (s < 0)           return "just now";
+    if (s < 60)          return "just now";
+    if (s < 3600)        return `${Math.round(s/60)}m`;
+    if (s < 86400)       return `${Math.round(s/3600)}h`;
+    if (s < 86400 * 30)  return `${Math.round(s/86400)}d`;
+    // Older than 30 days — show actual date instead of "Xd"
+    return dt.toLocaleDateString("en-US", { month:"short", day:"numeric" });
   } catch { return ""; }
 };
 const fmtDate = iso => {
