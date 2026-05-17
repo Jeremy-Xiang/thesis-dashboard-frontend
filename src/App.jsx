@@ -49,8 +49,16 @@ const f$ = v => v == null ? "—" : v >= 1000 ? `$${(v/1000).toFixed(0)}k` : `$$
 const fp = v => v == null ? "—" : `${v>=0?"+":""}${v.toFixed(1)}%`;
 const ago = iso => {
   if (!iso) return "";
-  const s = (Date.now() - new Date(iso)) / 1000;
-  return s < 3600 ? `${Math.round(s/60)}m ago` : s < 86400 ? `${Math.round(s/3600)}h ago` : `${Math.round(s/86400)}d ago`;
+  try {
+    const dt = new Date(iso);
+    if (isNaN(dt)) return "";
+    const s = (Date.now() - dt) / 1000;
+    if (s < 0) return "just now";
+    if (s < 60) return "just now";
+    if (s < 3600) return `${Math.round(s/60)}m ago`;
+    if (s < 86400) return `${Math.round(s/3600)}h ago`;
+    return `${Math.round(s/86400)}d ago`;
+  } catch(e) { return ""; }
 };
 
 // ── UI atoms ──────────────────────────────────────────────────────────────────
@@ -135,7 +143,7 @@ function Analyzer({ news }) {
   return (
     <>
       <div style={{ background:"#0d1117", border:"1px solid #1e2533", borderRadius:8, padding:20, marginBottom:16 }}>
-        <div style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace", marginBottom:14 }}>FinBERT Workbench</div>
+        <div style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace", marginBottom:14 }}>Sentiment Workbench</div>
         <div style={{ display:"flex", gap:10, marginBottom:12 }}>
           <input value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&analyze()}
             placeholder="Paste any financial headline — hit Enter to score…"
@@ -311,9 +319,9 @@ export default function ThesisDashboard() {
           <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:12, marginBottom:24 }}>
             <StatCard label="Portfolio Value" value={f$(totalVal)}      sub="Paper trading"         accent="#00e5ff" loading={pf.loading} />
             <StatCard label="Total Return"    value={fp(totalRet)}      sub="vs $15k basis"         accent="#69f0ae" loading={pf.loading} />
-            <StatCard label="Themes"          value="3"                 sub="AI · Defense · Energy" accent="#ff6d00" loading={false} />
+            <StatCard label="Themes"          value={Object.keys(THEMES).length} sub={Object.keys(THEMES).map(t=>t.split(" ")[0]).join(" · ")} accent="#ff6d00" loading={false} />
             <StatCard label="Tickers"         value={Object.keys(prices).length||15} sub="All themes" accent="#b39ddb" loading={px.loading} />
-            <StatCard label="Avg Sentiment"   value={globalSent}        sub="24h · FinBERT"         accent="#ffeb3b" loading={feed.loading} />
+            <StatCard label="Avg Sentiment"   value={globalSent}        sub="24h · NLP scored"         accent="#ffeb3b" loading={feed.loading} />
           </div>
 
           <div style={{ display:"grid", gridTemplateColumns:"1fr 300px", gap:16, marginBottom:16 }}>
@@ -321,7 +329,7 @@ export default function ThesisDashboard() {
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:20 }}>
                 <div>
                   <div style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace", marginBottom:4 }}>Performance by Theme</div>
-                  <div style={{ fontSize:12, color:"#3a4060" }}>{timeline.length ? `${timeline[0]?.date} → ${timeline.at(-1)?.date}` : "…"}</div>
+                  <div style={{ fontSize:12, color:"#3a4060" }}>{timeline.length ? (() => { try { const s=new Date(timeline[0]?.date); const e=new Date(timeline.at(-1)?.date); return `${s.toLocaleDateString("en-US",{month:"short",year:"numeric"})} → ${e.toLocaleDateString("en-US",{month:"short",year:"numeric"})}`; } catch(x){ return timeline[0]?.date+" → "+timeline.at(-1)?.date; } })() : "…"}</div>
                 </div>
                 <div style={{ display:"flex", gap:12 }}>
                   {Object.entries(THEMES).map(([n,c])=>(
@@ -342,7 +350,7 @@ export default function ThesisDashboard() {
                       </linearGradient>
                     ))}</defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1a1f2e" vertical={false}/>
-                    <XAxis dataKey="date" tick={{ fill:"#3a4060", fontSize:10, fontFamily:"monospace" }} axisLine={false} tickLine={false} tickFormatter={d=>d?.slice(5)} interval="preserveStartEnd"/>
+                    <XAxis dataKey="date" tick={{ fill:"#3a4060", fontSize:10, fontFamily:"monospace" }} axisLine={false} tickLine={false} tickFormatter={d=>{ if(!d) return ''; try { const dt=new Date(d); return isNaN(dt)?d.slice(5):(dt.toLocaleDateString('en-US',{month:'short',day:'numeric'})); } catch(e){ return d.slice(5); } }} interval="preserveStartEnd"/>
                     <YAxis tick={{ fill:"#3a4060", fontSize:10, fontFamily:"monospace" }} axisLine={false} tickLine={false} tickFormatter={v=>f$(v)}/>
                     <Tooltip content={<ChartTip/>}/>
                     {Object.entries(THEMES).map(([n,c])=>(
@@ -384,7 +392,7 @@ export default function ThesisDashboard() {
           <div style={{ background:"#0d1117", border:"1px solid #1e2533", borderRadius:8, overflow:"hidden" }}>
             <div style={{ padding:"14px 20px", borderBottom:"1px solid #1e2533", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <span style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace" }}>Position Monitor</span>
-              <span style={{ fontSize:10, color:"#3a4060", fontFamily:"monospace" }}>{px.updated ? `Updated ${ago(px.updated)}` : "Prices delayed"} · Sentiment: FinBERT</span>
+              <span style={{ fontSize:10, color:"#3a4060", fontFamily:"monospace" }}>{px.updated ? `Updated ${ago(px.updated)}` : "Prices delayed"} · Sentiment: NLP</span>
             </div>
             <table style={{ width:"100%", borderCollapse:"collapse" }}>
               <thead>
@@ -607,7 +615,7 @@ export default function ThesisDashboard() {
         {/* ══ ANALYZER ══ */}
         {tab === "analyzer" && (
           <div>
-            <div style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace", marginBottom:16 }}>FinBERT Sentiment Workbench</div>
+            <div style={{ fontSize:11, color:"#5a6480", letterSpacing:"0.1em", textTransform:"uppercase", fontFamily:"monospace", marginBottom:16 }}>Sentiment Workbench</div>
             <Analyzer news={news}/>
           </div>
         )}
