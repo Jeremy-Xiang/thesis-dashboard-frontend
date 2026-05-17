@@ -201,7 +201,7 @@ function SignalsTab({ signalData, signals }) {
   const tickerSigs = signalData?.tickers ?? {};
 
   const themeTickerMap = {};
-  Object.entries(THEMES).forEach(([t, cfg]) => { cfg.tickers?.forEach(tk => { themeTickerMap[tk] = t; }); });
+  Object.entries(THEMES).forEach(([t, cfg]) => { (cfg.tickers ?? []).forEach(tk => { themeTickerMap[tk] = t; }); });
 
   const filtered = themeFilter === "All"
     ? Object.entries(tickerSigs)
@@ -322,7 +322,7 @@ function SignalsTab({ signalData, signals }) {
       </div>
 
       {/* Theme signals row */}
-      {Object.keys(themeSigs).length > 0 && (
+      {Object.keys(themeSigs ?? {}).length > 0 && (
         <div style={{ marginBottom:16 }}>
           <Label>Theme signals</Label>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8 }}>
@@ -625,8 +625,8 @@ export default function ThesisDashboard() {
             {[
               { label:"PORTFOLIO", value:pf.loading?null:f$(totalVal),     sub:"paper trading",           accent:C.accent },
               { label:"RETURN",    value:pf.loading?null:fp(totalRet),      sub:"vs $15k cost basis",      accent:totalRet>=0?C.green:C.red },
-              { label:"THEMES",    value:Object.keys(THEMES).length,        sub:"investment buckets",      accent:C.muted },
-              { label:"TICKERS",   value:px.loading?null:Object.keys(prices).length||53, sub:"tracked positions", accent:C.muted },
+              { label:"THEMES",    value:Object.keys(THEMES ?? {}).length,        sub:"investment buckets",      accent:C.muted },
+              { label:"TICKERS",   value:px.loading?null:Object.keys(prices ?? {}).length||53, sub:"tracked positions", accent:C.muted },
               { label:"SENTIMENT", value:feed.loading?null:globalSent,      sub:"24h avg compound",        accent:C.muted },
               { label:"ARTICLES",  value:feed.loading?null:news.length,     sub:"scored today",            accent:C.muted },
             ].map(({ label, value, sub, accent }) => (
@@ -642,9 +642,9 @@ export default function ThesisDashboard() {
           </div>
 
           {/* Signal cards — quick view */}
-          {Object.keys(signalData.themes).length > 0 && (
+          {Object.keys(signalData?.themes ?? {}).length > 0 && (
             <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8, marginBottom:16 }}>
-              {Object.entries(signalData.themes).map(([theme, sig]) => {
+              {Object.entries(signalData?.themes ?? {}).map(([theme, sig]) => {
                 const cfg  = THEMES[theme] ?? { color:C.muted, short:"—" };
                 const col  = sig.signal==="BUY"?C.green:sig.signal==="REDUCE"?C.red:C.yellow;
                 const prob = Math.round(sig.outperform_prob*100);
@@ -698,7 +698,14 @@ export default function ThesisDashboard() {
                     ))}</defs>
                     <CartesianGrid strokeDasharray="2 4" stroke={C.border} vertical={false}/>
                     <XAxis dataKey="date" tick={{ fill:C.dim, fontSize:9, fontFamily:"'IBM Plex Mono',monospace" }}
-                      axisLine={false} tickLine={false} tickFormatter={fmtDate} interval="preserveStartEnd"/>
+                      axisLine={false} tickLine={false} tickFormatter={d => {
+                        try {
+                          const dt = new Date(d);
+                          return isNaN(dt) ? "" : dt.toLocaleDateString("en-US",{month:"short",year:"2-digit"});
+                        } catch { return ""; }
+                      }}
+                      interval={Math.max(1, Math.floor((timeline.length || 1) / 6))}
+                    />
                     <YAxis tick={{ fill:C.dim, fontSize:9, fontFamily:"'IBM Plex Mono',monospace" }}
                       axisLine={false} tickLine={false} tickFormatter={v=>f$(v)}/>
                     <Tooltip content={<ChartTip/>}/>
@@ -938,25 +945,25 @@ export default function ThesisDashboard() {
                         <div>
                           <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:5 }}>
                             <ThemeTag theme={item.theme}/>
-                            <Mono style={{ fontSize:10, color:C.dim }}>
+                            <Mono style={{ fontSize:10, color:"#888888" }}>
                               {item.source} · {ago(item.published_at)}
                             </Mono>
                           </div>
-                          <div style={{ fontSize:12, color:C.text, lineHeight:1.5, marginBottom:6 }}>
+                          <div style={{ fontSize:12, color:"#f0f0f0", lineHeight:1.6, marginBottom:6 }}>
                             {item.headline}
                           </div>
                           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                            <Mono style={{ fontSize:9, color:C.dim }}>SENT</Mono>
+                            <Mono style={{ fontSize:9, color:"#777777" }}>SENT</Mono>
                             <div style={{ width:80 }}><SentBar score={s?.score}/></div>
-                            {s?.model && <Mono style={{ fontSize:9, color:C.dim }}>via {s.model}</Mono>}
+                            {s?.model && <Mono style={{ fontSize:9, color:"#555555" }}>via {s.model}</Mono>}
                           </div>
                         </div>
                         <div style={{ textAlign:"right" }}>
-                          <Mono style={{ fontSize:15, fontWeight:700, color:pos?C.green:C.red }}>
+                          <Mono style={{ fontSize:16, fontWeight:800, color:pos?C.green:C.red }}>
                             {pos?"+":""}{s?.compound?.toFixed(2)}
                           </Mono>
                           <Mono style={{ fontSize:9, color:pos?C.green:C.red, display:"block",
-                            textTransform:"uppercase", marginTop:2 }}>{s?.label}</Mono>
+                            textTransform:"uppercase", letterSpacing:"0.08em", marginTop:3 }}>{s?.label}</Mono>
                         </div>
                       </div>
                     </a>
