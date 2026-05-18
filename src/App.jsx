@@ -106,7 +106,7 @@ const Label = ({ children }) => (
 const Divider = () => <div style={{ height:1, background:C.border, margin:"0" }} />;
 
 const SigBadge = ({ signal }) => {
-  const col = signal === "BUY" ? C.green : signal === "REDUCE" ? C.red : C.yellow;
+  const col = signal === "BUY" ? C.green : signal === "TRIM" ? C.red : C.yellow;
   return (
     <span style={{ fontSize:10, fontWeight:700, padding:"2px 6px", borderRadius:2,
       background: col + "18", color: col, fontFamily:"'IBM Plex Mono',monospace",
@@ -213,7 +213,7 @@ function SignalsTab({ signalData, signals }) {
 
   const sorted = [...filtered].sort((a,b) => b[1].outperform_prob - a[1].outperform_prob);
 
-  const sigCol = s => s === "BUY" ? C.green : s === "REDUCE" ? C.red : C.yellow;
+  const sigCol = s => s === "BUY" ? C.green : s === "TRIM" ? C.red : C.yellow;
 
   return (
     <div>
@@ -283,7 +283,7 @@ function SignalsTab({ signalData, signals }) {
               {/* Probability ruler */}
               <div style={{ marginBottom:14 }}>
                 <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
-                  <Mono style={{ fontSize:9, color:C.muted }}>REDUCE ←</Mono>
+                  <Mono style={{ fontSize:9, color:C.muted }}>TRIM ←</Mono>
                   <Mono style={{ fontSize:9, color:C.muted }}>40% / 60%</Mono>
                   <Mono style={{ fontSize:9, color:C.muted }}>→ BUY</Mono>
                 </div>
@@ -650,7 +650,7 @@ export default function ThesisDashboard() {
             <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8, marginBottom:16 }}>
               {Object.entries(signalData?.themes ?? {}).map(([theme, sig]) => {
                 const cfg  = THEMES[theme] ?? { color:C.muted, short:"—" };
-                const col  = sig.signal==="BUY"?C.green:sig.signal==="REDUCE"?C.red:C.yellow;
+                const col  = sig.signal==="BUY"?C.green:sig.signal==="TRIM"?C.red:C.yellow;
                 const prob = Math.round(sig.outperform_prob*100);
                 return (
                   <div key={theme} onClick={() => setTab("signals")}
