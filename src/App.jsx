@@ -675,7 +675,7 @@ export default function ThesisDashboard() {
                 <div>
                   <div style={{ fontSize:12, fontWeight:600, marginBottom:2 }}>Performance by theme</div>
                   <Mono style={{ fontSize:10, color:C.muted }}>
-                    {timeline.length ? `${fmtDate(timeline[0]?.date)} – ${fmtDate(timeline.at(-1)?.date)}` : "Loading…"}
+                    {timeline.length ? (() => { const sorted = [...timeline].sort((a,b)=>a.date>b.date?1:-1); return `${fmtDate(sorted[0]?.date)} – ${fmtDate(sorted.at(-1)?.date)}`; })() : "Loading…"}
                   </Mono>
                 </div>
                 <div style={{ display:"flex", gap:12 }}>
