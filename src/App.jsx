@@ -627,7 +627,7 @@ export default function ThesisDashboard() {
           <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:1, marginBottom:16,
             border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
             {[
-              { label:"PORTFOLIO", value:pf.loading?null:f$(totalVal),     sub:"paper trading",           accent:C.accent },
+              { label:"PORTFOLIO", value:pf.loading?null:f$(totalVal),     sub:"3-year thesis",          accent:C.accent },
               { label:"RETURN",    value:pf.loading?null:fp(totalRet),      sub:"vs $15k cost basis",      accent:totalRet>=0?C.green:C.red },
               { label:"THEMES",    value:Object.keys(THEMES ?? {}).length,        sub:"investment buckets",      accent:C.muted },
               { label:"TICKERS",   value:px.loading?null:Object.keys(prices ?? {}).length||53, sub:"tracked positions", accent:C.muted },
