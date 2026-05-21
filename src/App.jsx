@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from "recharts";
 
 const API =
@@ -412,9 +412,10 @@ function AnalyzerTab({ news }) {
   const [quote,   setQuote]   = useState(null);
   const [error,   setError]   = useState(null);
   const [phase,   setPhase]   = useState("idle");
-  const reportRef = React.useRef(null);
+  const reportRef = useRef(null);
+  const [showAgentPrompt, setShowAgentPrompt] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (reportRef.current) reportRef.current.scrollTop = reportRef.current.scrollHeight;
   }, [report]);
 
@@ -428,136 +429,49 @@ function AnalyzerTab({ news }) {
 
   const pct = v => v == null ? "N/A" : `${(v*100).toFixed(1)}%`;
 
+  const agentPrompt = (sym) => `📈 Analyze the stock ticker: ${sym}
+
+Give me a complete institutional-style breakdown using live market data from the THESIS backend (${API}/api/analyze/${sym}).
+
+Include:
+1️⃣ Company Snapshot — name, market cap, sector, price, 52w range, volume
+2️⃣ Valuation Analysis — P/E vs sector, forward P/E, PEG, P/S, EV/EBITDA, fair value call
+3️⃣ Earnings Breakdown — last 4 quarters, EPS vs estimates, trends
+4️⃣ Technical Analysis — trend, RSI, MACD, support/resistance, SMA 20/50/200, volume, momentum
+5️⃣ Options Flow + Sentiment — unusual activity, put/call, IV, analyst actions (note: use backend data; options flow may be inferred)
+6️⃣ Risk Assessment — top 3-5 risks
+7️⃣ Bull vs Bear Case
+8️⃣ Competitive Positioning — vs top competitors
+9️⃣ Final Verdict — overall, short-term, long-term, key levels, catalyst
+🔟 Bonus — insider activity, macro risks, probability scenarios
+
+Format like a professional hedge fund analyst report with tables.`;
+
   const analyze = async () => {
     const sym = ticker.trim().toUpperCase();
     if (!sym) return;
     setLoading(true); setReport(""); setError(null); setQuote(null); setPhase("fetching");
     try {
-      // 1. Fetch live data from our backend (Yahoo Finance + Alpha Vantage)
       const r = await fetch(`${API}/api/analyze/${sym}`);
-      if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Not found"); }
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.detail || `Failed to fetch ${sym}`);
+      }
       const data = await r.json();
       setQuote(data);
       setPhase("analyzing");
 
-      // 2. Build data context for Claude
-      const ctx = `
-LIVE MARKET DATA FOR ${sym} (${new Date().toUTCString()}):
-Company: ${data.long_name || sym}
-Sector: ${data.sector || "N/A"} | Industry: ${data.industry || "N/A"}
-Employees: ${data.employees?.toLocaleString() || "N/A"}
-Price: $${data.price?.toFixed(2)} | Prev Close: $${data.prev_close?.toFixed(2)}
-Change: ${data.price && data.prev_close ? ((data.price/data.prev_close-1)*100).toFixed(2)+"%" : "N/A"}
-52W High: $${data.week52_high?.toFixed(2)} | 52W Low: $${data.week52_low?.toFixed(2)}
-Position in 52W Range: ${data.pct_of_52w_range != null ? data.pct_of_52w_range+"%" : "N/A"}
-Market Cap: ${fmt(data.market_cap,"$")} | Avg Volume (30d): ${fmt(data.avg_volume,"","",0)}
-Volume Trend (10d vs 30d avg): ${data.volume_trend != null ? (data.volume_trend>=0?"+":"")+data.volume_trend+"%" : "N/A"}
+      const resp = await fetch(`${API}/api/analyze/${sym}/report`);
+      if (!resp.ok) {
+        const e = await resp.json().catch(() => ({}));
+        throw new Error(e.detail || "Report generation failed");
+      }
 
-VALUATION:
-P/E (TTM): ${data.pe_ttm?.toFixed(2) || "N/A"}
-Forward P/E: ${data.forward_pe?.toFixed(2) || "N/A"}
-PEG Ratio: ${data.peg_ratio?.toFixed(2) || "N/A"}
-Price/Sales: ${data.price_to_sales?.toFixed(2) || "N/A"}
-Price/Book: ${data.price_to_book?.toFixed(2) || "N/A"}
-EV/EBITDA: ${data.ev_ebitda?.toFixed(2) || "N/A"}
-EV/Revenue: ${data.ev_revenue?.toFixed(2) || "N/A"}
+      const reader = resp.body?.getReader();
+      if (!reader) throw new Error("Streaming not supported");
 
-FINANCIALS:
-Revenue (TTM): ${fmt(data.revenue,"$")}
-Gross Margin: ${pct(data.gross_margins)}
-Operating Margin: ${pct(data.operating_margins)}
-Profit Margin: ${pct(data.profit_margins)}
-Revenue Growth YOY: ${pct(data.revenue_growth)}
-Earnings Growth: ${pct(data.earnings_growth)}
-Free Cash Flow: ${fmt(data.free_cashflow,"$")}
-Total Cash: ${fmt(data.total_cash,"$")}
-Total Debt: ${fmt(data.total_debt,"$")}
-ROE: ${pct(data.roe)} | ROA: ${pct(data.roa)}
-
-RECENT EARNINGS (last 4 quarters):
-${(data.earnings_history||[]).map(e=>`${e.date}: EPS Actual $${e.actual?.toFixed(2)||"N/A"} vs Est $${e.estimate?.toFixed(2)||"N/A"} (${e.actual&&e.estimate?(((e.actual-e.estimate)/Math.abs(e.estimate))*100).toFixed(1)+"%":"N/A"} surprise)`).join("\n")}
-
-TECHNICALS (computed from 2y daily price history):
-RSI(14): ${data.rsi_14?.toFixed(2) || "N/A"} ${data.rsi_14>70?"[OVERBOUGHT]":data.rsi_14<30?"[OVERSOLD]":""}
-MACD: ${data.macd?.toFixed(4) || "N/A"} | Signal: ${data.macd_signal?.toFixed(4) || "N/A"} | Histogram: ${data.macd_hist?.toFixed(4) || "N/A"} ${data.macd_hist>0?"[BULLISH MOMENTUM]":"[BEARISH MOMENTUM]"}
-SMA(20):  $${data.sma_20?.toFixed(2) || "N/A"} ${data.price&&data.sma_20?(data.price>data.sma_20?"[ABOVE — bullish]":"[BELOW — bearish]"):""}
-SMA(50):  $${data.sma_50?.toFixed(2) || "N/A"} ${data.price&&data.sma_50?(data.price>data.sma_50?"[ABOVE — bullish]":"[BELOW — bearish]"):""}
-SMA(200): $${data.sma_200?.toFixed(2) || "N/A"} ${data.price&&data.sma_200?(data.price>data.sma_200?"[ABOVE — bullish]":"[BELOW — bearish]"):""}
-Bollinger Bands: Upper $${data.bb_upper?.toFixed(2)||"N/A"} | Mid $${data.bb_mid?.toFixed(2)||"N/A"} | Lower $${data.bb_lower?.toFixed(2)||"N/A"}
-ATR(14): $${data.atr_14?.toFixed(2) || "N/A"} (daily volatility measure)
-
-ANALYST CONSENSUS:
-Recommendation: ${data.recommendation?.toUpperCase() || "N/A"}
-Target Mean: $${data.target_mean?.toFixed(2) || "N/A"} | Upside: ${data.target_mean&&data.price?((data.target_mean/data.price-1)*100).toFixed(1)+"%":"N/A"}
-Target High: $${data.target_high?.toFixed(2) || "N/A"} | Target Low: $${data.target_low?.toFixed(2) || "N/A"}
-Analyst Breakdown: ${data.analyst_strong_buy||0} Strong Buy | ${data.analyst_buy||0} Buy | ${data.analyst_hold||0} Hold | ${data.analyst_sell||0} Sell | ${data.analyst_strong_sell||0} Strong Sell
-
-POSITIONING:
-Beta: ${data.beta?.toFixed(2) || "N/A"}
-Short % Float: ${pct(data.short_pct_float)}
-Insider Ownership: ${pct(data.insider_pct)}
-Institutional Ownership: ${pct(data.institution_pct)}
-Dividend Yield: ${data.dividend_yield ? pct(data.dividend_yield) : "None"}
-`.trim();
-
-      // 3. Stream Claude report
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 4000,
-          stream: true,
-          messages: [{ role: "user", content: `You are a senior analyst at a top-tier hedge fund. Using the live market data below, produce a complete institutional-grade stock analysis report for ${sym}.
-
-${ctx}
-
-Format with these exact sections using ## headers:
-
-## 1. Company Snapshot
-What the company does, market position, key stats table.
-
-## 2. Valuation Analysis
-P/E, Forward P/E, PEG, P/S, EV/EBITDA vs sector averages. State: overvalued, fairly valued, or undervalued.
-
-## 3. Financial Health
-Revenue growth, margins, FCF, balance sheet quality.
-
-## 4. Technical Analysis
-RSI interpretation, MACD signal, price vs SMA(20/50/200), 52-week positioning, trend direction, support/resistance levels.
-
-## 5. Sentiment & Positioning
-Short interest, insider/institutional ownership, analyst consensus, upside to target.
-
-## 6. Risk Assessment
-Top 3-5 specific risks to this stock right now.
-
-## 7. Bull vs Bear Case
-**Bull:** 3 strongest arguments with catalysts
-**Bear:** 3 strongest arguments with downside scenarios
-
-## 8. Competitive Positioning
-Compare vs top 2-3 competitors in a table (growth, margins, valuation).
-
-## 9. Final Verdict
-- Overall: BULLISH / NEUTRAL / BEARISH
-- Short-term (1-3 months): price range
-- Long-term (12 months): price target + reasoning
-- Key levels to watch
-- Biggest upcoming catalyst
-
-## 10. Probability Scenarios
-- Bull case (X%): target + conditions
-- Base case (X%): target + conditions
-- Bear case (X%): target + conditions
-
-Be specific, quantitative, direct. Write like a $10B fund depends on this.` }],
-        }),
-      });
-
-      const reader  = resp.body.getReader();
       const decoder = new TextDecoder();
-      let   buf     = "";
+      let buf = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -565,19 +479,24 @@ Be specific, quantitative, direct. Write like a $10B fund depends on this.` }],
         const lines = buf.split("\n");
         buf = lines.pop() || "";
         for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const j = JSON.parse(line.slice(6));
-              if (j.type === "content_block_delta" && j.delta?.text) {
-                setReport(prev => prev + j.delta.text);
-              }
-            } catch {}
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const j = JSON.parse(line.slice(6));
+            if (j.error) throw new Error(j.error);
+            if (j.text) setReport(prev => prev + j.text);
+          } catch (err) {
+            if (err instanceof SyntaxError) continue;
+            throw err;
           }
         }
       }
       setPhase("done");
-    } catch(e) { setError(e.message); setPhase("idle"); }
-    finally { setLoading(false); }
+    } catch (e) {
+      setError(e.message || "Analysis failed");
+      setPhase("idle");
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Markdown renderer
@@ -648,6 +567,29 @@ Be specific, quantitative, direct. Write like a $10B fund depends on this.` }],
           </button>
         </div>
         {error && <Mono style={{ fontSize:11, color:C.red, marginTop:8 }}>✗ {error}</Mono>}
+        <div style={{ marginTop:10, display:"flex", gap:8, alignItems:"center" }}>
+          <button type="button" onClick={() => setShowAgentPrompt(v => !v)} style={{
+            background:"transparent", border:`1px solid ${C.border2}`, borderRadius:2,
+            padding:"3px 10px", color:C.muted, fontSize:10, cursor:"pointer",
+            fontFamily:"'IBM Plex Mono',monospace" }}>
+            {showAgentPrompt ? "HIDE AGENT PROMPT" : "AGENT PROMPT →"}
+          </button>
+          {ticker.trim() && (
+            <button type="button" onClick={() => navigator.clipboard?.writeText(agentPrompt(ticker.trim().toUpperCase()))}
+              style={{ background:"transparent", border:`1px solid ${C.border2}`, borderRadius:2,
+                padding:"3px 10px", color:C.accent, fontSize:10, cursor:"pointer",
+                fontFamily:"'IBM Plex Mono',monospace" }}>
+              COPY PROMPT
+            </button>
+          )}
+        </div>
+        {showAgentPrompt && (
+          <pre style={{ marginTop:10, padding:12, background:C.bg, border:`1px solid ${C.border}`,
+            borderRadius:3, fontSize:10, color:C.muted, whiteSpace:"pre-wrap", lineHeight:1.5,
+            fontFamily:"'IBM Plex Mono',monospace", maxHeight:200, overflowY:"auto" }}>
+            {agentPrompt(ticker.trim().toUpperCase() || "[TICKER]")}
+          </pre>
+        )}
       </div>
 
       {/* Quote strip */}
@@ -656,8 +598,10 @@ Be specific, quantitative, direct. Write like a $10B fund depends on this.` }],
           padding:"12px 16px", marginBottom:16,
           display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))", gap:12 }}>
           {[
-            { label:"PRICE",     value:`$${q.price?.toFixed(2)}`,   color: pctChange>=0?C.green:C.red },
-            { label:"CHANGE",    value:`${pctChange>=0?"+":""}${pctChange?.toFixed(2)}%`, color:pctChange>=0?C.green:C.red },
+            { label:"PRICE",     value:`$${q.price?.toFixed(2)}`,
+              color: pctChange!=null ? (pctChange>=0?C.green:C.red) : C.text },
+            { label:"CHANGE",    value: pctChange!=null ? `${pctChange>=0?"+":""}${pctChange.toFixed(2)}%` : "N/A",
+              color: pctChange!=null ? (pctChange>=0?C.green:C.red) : C.text },
             { label:"52W HIGH",  value:`$${q.week52_high?.toFixed(2)}` },
             { label:"52W LOW",   value:`$${q.week52_low?.toFixed(2)}` },
             { label:"52W POS",   value:q.pct_of_52w_range!=null?`${q.pct_of_52w_range}%`:"N/A",
