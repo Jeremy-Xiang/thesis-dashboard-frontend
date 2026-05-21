@@ -1215,6 +1215,16 @@ export default function ThesisDashboard() {
       } catch { /* ignore */ }
     })();
   }, [online]);
+
+  useEffect(() => {
+    if (tab !== "news" || feed.loading || (news?.length ?? 0) > 0) return;
+    (async () => {
+      try {
+        await fetch(`${API}/api/news/refresh`, { method: "POST" });
+        setTimeout(() => feed.refetch(), 3000);
+      } catch { /* ignore */ }
+    })();
+  }, [tab, feed.loading, news?.length]);
   const timeline   = portfolio?.timeline ?? [];
   const totalVal   = portfolio?.total_value  ?? 0;
   const totalRet   = portfolio?.total_return ?? 0;
@@ -1605,9 +1615,15 @@ export default function ThesisDashboard() {
                 News failed to load: {feed.error}
               </Mono>
             ) : filtNews.length === 0 ? (
-              <Mono style={{ fontSize:12, color:C.dim, padding:40, textAlign:"center", display:"block" }}>
-                No articles yet — backend may still be fetching RSS. Click Refresh data, wait ~30s.
-              </Mono>
+              <div style={{ padding: 40, textAlign: "center" }}>
+                <Mono style={{ fontSize: 12, color: C.dim, display: "block", marginBottom: 12 }}>
+                  Fetching headlines from RSS… (first load can take 30–60s on Render).
+                </Mono>
+                <Btn small onClick={async () => {
+                  await fetch(`${API}/api/news/refresh`, { method: "POST" });
+                  setTimeout(() => feed.refetch(), 4000);
+                }}>Fetch news now</Btn>
+              </div>
             ) : (
               <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
                 {filtNews.map((item, i) => {
