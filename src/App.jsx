@@ -223,7 +223,7 @@ const SentBar = ({ score=0.5 }) => {
 };
 
 // ── Signals tab ───────────────────────────────────────────────────────────────
-function SignalsTab({ signalData, signals, signalsError, signalsFallback }) {
+function SignalsTab({ signalData, signals, signalsError, signalsFallback, signalsTickersFallback, onRetrySignals }) {
   const [customTicker,  setCustomTicker]  = useState("");
   const [lookupResult,  setLookupResult]  = useState(null);
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -267,6 +267,13 @@ function SignalsTab({ signalData, signals, signalsError, signalsFallback }) {
         <Panel accent={C.yellow} style={{ padding: 12, marginBottom: 14 }}>
           <Mono style={{ fontSize: 11, color: C.muted }}>
             ML model still training — showing momentum fallback. Click Refresh data in the sidebar.
+          </Mono>
+        </Panel>
+      )}
+      {signalsTickersFallback && (
+        <Panel accent={C.yellow} style={{ padding: 12, marginBottom: 14 }}>
+          <Mono style={{ fontSize: 11, color: C.muted, lineHeight: 1.6 }}>
+            Per-ticker models still training (theme signals are ready). Momentum estimates shown below — click Refresh data or wait ~1 min and reload.
           </Mono>
         </Panel>
       )}
@@ -424,9 +431,12 @@ function SignalsTab({ signalData, signals, signalsError, signalsFallback }) {
       </div>
 
       {!sorted.length && !signals.loading && (
-        <Mono style={{ fontSize: 12, color: C.dim, padding: 24, textAlign: "center", display: "block" }}>
-          No ticker signals yet — wait for backend training or click Refresh data.
-        </Mono>
+        <div style={{ padding: 24, textAlign: "center" }}>
+          <Mono style={{ fontSize: 12, color: C.dim, display: "block", marginBottom: 12 }}>
+            Per-ticker models still loading on the server (theme row above is ready).
+          </Mono>
+          <Btn small onClick={onRetrySignals}>Retry signals</Btn>
+        </div>
       )}
 
       {/* Ticker grid */}
@@ -524,14 +534,14 @@ function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, sign
               <div key={i} onClick={() => t.ticker && onAnalyze(t.ticker)}
                 style={{ padding: "10px 16px", borderBottom: `1px solid ${C.border}`, cursor: t.ticker ? "pointer" : "default" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <Mono style={{ fontSize: 12, fontWeight: 600, color: C.accent }}>{t.ticker || "—"}</Mono>
+                  <Mono style={{ fontSize: 12, fontWeight: 600, color: C.link }}>{t.ticker || "—"}</Mono>
                   <TxBadge tx={t.transaction} />
                 </div>
                 <Mono style={{ fontSize: 10, color: C.muted, display: "block", marginTop: 4 }}>{t.politician}</Mono>
                 <Mono style={{ fontSize: 9, color: C.dim }}>{t.amount_range || "—"} · filed {t.filed || "—"}</Mono>
                 {t.doc_url && (
                   <a href={t.doc_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
-                    style={{ fontSize: 9, color: C.accent, marginTop: 4, display: "inline-block" }}>PTR filing →</a>
+                    style={{ fontSize: 9, color: C.link, textDecoration: "underline", marginTop: 4, display: "inline-block" }}>PTR filing →</a>
                 )}
               </div>
             )) : <Mono style={{ padding: 16, color: C.dim }}>No congress trades yet.</Mono>}
@@ -546,13 +556,13 @@ function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, sign
               <div key={i} onClick={() => onAnalyze(t.ticker)}
                 style={{ padding: "10px 16px", borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <Mono style={{ fontSize: 12, fontWeight: 600, color: C.accent }}>{t.ticker}</Mono>
+                  <Mono style={{ fontSize: 12, fontWeight: 600, color: C.link }}>{t.ticker}</Mono>
                   <Mono style={{ fontSize: 9, color: C.dim }}>{t.filed}</Mono>
                 </div>
                 <Mono style={{ fontSize: 10, color: C.muted }}>{t.insider}</Mono>
                 {t.sec_url && (
                   <a href={t.sec_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
-                    style={{ fontSize: 9, color: C.accent, marginTop: 4, display: "inline-block" }}>SEC filing →</a>
+                    style={{ fontSize: 9, color: C.link, textDecoration: "underline", marginTop: 4, display: "inline-block" }}>SEC filing →</a>
                 )}
               </div>
             ))}
@@ -567,7 +577,7 @@ function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, sign
             return (
               <div key={row.ticker} onClick={() => onAnalyze(row.ticker)}
                 style={{ padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}`, cursor: "pointer" }}>
-                <Mono style={{ fontSize: 13, fontWeight: 700, color: C.accent }}>{row.ticker}</Mono>
+                <Mono style={{ fontSize: 13, fontWeight: 700, color: C.link }}>{row.ticker}</Mono>
                 <Mono style={{ fontSize: 9, color: C.dim, display: "block", marginTop: 4 }}>
                   {row.congress_buy ? "CONG " : ""}{row.insider_filing ? "SEC4 " : ""}{sig?.signal || row.signal}
                 </Mono>
@@ -584,13 +594,59 @@ function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, sign
   );
 }
 
+function buildWeeklyDigest({ signalData, flowData, buys, trims, attrRows }) {
+  const date = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+  const lines = [`THESIS Weekly — ${date}`, "", "THEME SIGNALS (30d vs SPY)"];
+  Object.entries(signalData?.themes ?? {}).forEach(([name, sig]) => {
+    const short = THEMES[name]?.short ?? name.split(" ")[0];
+    const pct = Math.round((sig.outperform_prob ?? 0.5) * 100);
+    lines.push(`  • ${short}: ${pct}% ${sig.signal}`);
+  });
+  lines.push("", "BUY QUEUE (prob ≥60%, sentiment ≥0.55)");
+  if (buys.length) {
+    buys.slice(0, 10).forEach(r => {
+      lines.push(`  • ${r.tk}: ${(r.prob * 100).toFixed(0)}% · sent ${r.sent.toFixed(2)} · ${r.signal}${r.tier ? ` · tier ${r.tier}` : ""}${r.size ? ` · ~$${r.size}` : ""}`);
+    });
+  } else lines.push("  (none this week)");
+  const congress = (flowData?.congress?.trades ?? []).filter(t => {
+    const tx = (t.transaction || "").toUpperCase();
+    return tx === "BUY" || String(t.transaction || "").toLowerCase().includes("purchase");
+  });
+  lines.push("", `CONGRESS BUYS (${congress.length} on watchlist)`);
+  if (congress.length) {
+    congress.slice(0, 12).forEach(t => {
+      lines.push(`  • ${t.ticker}: ${t.politician} · ${t.amount_range || "—"} · filed ${t.filed || "—"}`);
+    });
+  } else lines.push("  (none)");
+  lines.push("", "TRIM / EXIT");
+  if (trims.length) {
+    trims.slice(0, 8).forEach(r => lines.push(`  • ${r.tk}: ${(r.prob * 100).toFixed(0)}% · ${r.signal}`));
+  } else lines.push("  (none)");
+  if (attrRows.length) {
+    lines.push("", "THEME ALPHA (vs SPY)");
+    attrRows.forEach(r => lines.push(`  • ${THEMES[r.name]?.short ?? r.name}: ${r.alpha >= 0 ? "+" : ""}${r.alpha?.toFixed(1)}%`));
+  }
+  lines.push("", "—", "Public data only · not financial advice.", "https://thesis.jeremyxiang.com");
+  return lines.join("\n");
+}
+
+function AlignmentCheck({ ok, label }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10 }}>
+      <Mono style={{ color: ok ? C.green : C.dim, fontWeight: 700 }}>{ok ? "✓" : "○"}</Mono>
+      <Mono style={{ color: ok ? C.text : C.dim }}>{label}</Mono>
+    </div>
+  );
+}
+
 // ── Framework tab — THESIS investment process ─────────────────────────────────
-function FrameworkTab({ portfolio, signalData, attrData, avgSent, onAnalyze }) {
+function FrameworkTab({ portfolio, signalData, attrData, avgSent, flowData, onAnalyze }) {
   const [journal, setJournal] = useState(() => {
     try { return JSON.parse(localStorage.getItem("thesis_journal") || "[]"); }
     catch { return []; }
   });
   const [note, setNote] = useState("");
+  const [exportMsg, setExportMsg] = useState(null);
 
   const attrRows = Object.entries(attrData || {})
     .filter(([k]) => k !== "_portfolio")
@@ -621,6 +677,43 @@ function FrameworkTab({ portfolio, signalData, attrData, avgSent, onAnalyze }) {
   buys.sort((a, b) => b.prob - a.prob);
   trims.sort((a, b) => a.prob - b.prob);
 
+  const congressBuys = new Set(
+    (flowData?.congress?.trades ?? [])
+      .filter(t => {
+        const tx = (t.transaction || "").toUpperCase();
+        return tx === "BUY" || String(t.transaction || "").toLowerCase().includes("purchase");
+      })
+      .map(t => (t.ticker || "").toUpperCase())
+      .filter(Boolean)
+  );
+
+  const alignmentRows = buys.slice(0, 8).map(row => {
+    const mlBuy = row.signal === "BUY";
+    const themeOk = row.themeAlpha > 0;
+    const sentOk = row.sent >= 0.55;
+    const congressOk = congressBuys.has(row.tk);
+    const score = [mlBuy, themeOk, sentOk].filter(Boolean).length;
+    return { ...row, mlBuy, themeOk, sentOk, congressOk, score, aligned: score === 3 };
+  });
+
+  const weeklyText = buildWeeklyDigest({ signalData, flowData, buys, trims, attrRows });
+
+  const copyWeekly = async () => {
+    try {
+      await navigator.clipboard.writeText(weeklyText);
+      setExportMsg("Copied to clipboard");
+    } catch {
+      setExportMsg("Copy failed — use Email draft");
+    }
+    setTimeout(() => setExportMsg(null), 3000);
+  };
+
+  const emailWeekly = () => {
+    const subject = encodeURIComponent(`THESIS Weekly — ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`);
+    const body = encodeURIComponent(weeklyText.slice(0, 6000));
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  };
+
   const saveNote = () => {
     if (!note.trim()) return;
     const entry = { date: new Date().toISOString().slice(0, 10), text: note.trim() };
@@ -638,7 +731,7 @@ function FrameworkTab({ portfolio, signalData, attrData, avgSent, onAnalyze }) {
       onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; e.currentTarget.style.transform = "translateX(4px)"; }}
       onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.transform = "none"; }}>
       <div>
-        <Mono style={{ fontSize:13, fontWeight:700, color:C.accent }}>{row.tk}</Mono>
+        <Mono style={{ fontSize:13, fontWeight:700, color:C.link }}>{row.tk}</Mono>
         <Mono style={{ fontSize:9, color:C.muted, display:"block", marginTop:2 }}>
           {row.theme?.split(" ")[0] || "—"} · signal {row.signal} · {(row.prob*100).toFixed(0)}% · sent {row.sent.toFixed(2)}
         </Mono>
@@ -681,6 +774,60 @@ function FrameworkTab({ portfolio, signalData, attrData, avgSent, onAnalyze }) {
           </Panel>
         ))}
       </div>
+
+      <Panel style={{ marginBottom: 14, padding: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <Label>Weekly digest</Label>
+            <Mono style={{ fontSize: 10, color: C.dim, display: "block", marginTop: 4 }}>
+              BUY queue + congress buys + theme signals — paste into email or newsletter
+            </Mono>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {exportMsg && <Mono style={{ fontSize: 10, color: C.green }}>{exportMsg}</Mono>}
+            <Btn small ghost onClick={copyWeekly}>Copy</Btn>
+            <Btn small onClick={emailWeekly}>Email draft</Btn>
+          </div>
+        </div>
+        <pre style={{
+          margin: 0, padding: 12, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 4,
+          fontSize: 10, color: C.muted, fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1.55,
+          maxHeight: 160, overflow: "auto", whiteSpace: "pre-wrap",
+        }}>{weeklyText}</pre>
+      </Panel>
+
+      <Panel style={{ marginBottom: 14, padding: 16 }}>
+        <Label>Entry checklist — 3 of 3 required</Label>
+        <Mono style={{ fontSize: 10, color: C.dim, display: "block", marginBottom: 12, lineHeight: 1.5 }}>
+          ML BUY · theme alpha &gt; 0 vs SPY · sentiment ≥ 0.55. Congress buy shown as bonus.
+        </Mono>
+        {alignmentRows.length ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
+            {alignmentRows.map(row => (
+              <div key={row.tk} onClick={() => onAnalyze(row.tk)} style={{
+                padding: 10, background: C.bg, borderRadius: 6, cursor: "pointer",
+                border: `1px solid ${row.aligned ? C.green : C.border}`,
+                boxShadow: row.aligned ? `0 0 0 1px ${C.green}33` : "none",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                  <Mono style={{ fontSize: 13, fontWeight: 700, color: C.link }}>{row.tk}</Mono>
+                  <Mono style={{ fontSize: 10, fontWeight: 700, color: row.aligned ? C.green : C.yellow }}>
+                    {row.score}/3
+                  </Mono>
+                </div>
+                <AlignmentCheck ok={row.mlBuy} label="ML BUY" />
+                <AlignmentCheck ok={row.themeOk} label="Theme α &gt; 0" />
+                <AlignmentCheck ok={row.sentOk} label="Sentiment ≥ 0.55" />
+                {row.congressOk && (
+                  <Mono style={{ fontSize: 9, color: C.accent, marginTop: 6 }}>+ congress BUY</Mono>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Mono style={{ fontSize: 11, color: C.dim }}>No BUY queue names — check Signals tab after Refresh data.</Mono>
+        )}
+      </Panel>
 
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
         <Panel lift accent={C.green} style={{ padding:0, overflow:"hidden" }}>
@@ -875,7 +1022,7 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
         </div>
       );
       if (line.startsWith("### ")) return (
-        <div key={i} style={{ fontSize:12, fontWeight:600, color:"#60a5fa", marginTop:12, marginBottom:4 }}>
+        <div key={i} style={{ fontSize:12, fontWeight:600, color:C.muted, marginTop:12, marginBottom:4 }}>
           {line.replace("### ","")}
         </div>
       );
@@ -893,7 +1040,7 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
       );
       if (!line.trim()) return <div key={i} style={{ height:6 }}/>;
       return (
-        <div key={i} style={{ fontSize:12, color:"#94a3b8", lineHeight:1.7, marginBottom:2 }}
+        <div key={i} style={{ fontSize:12, color:C.muted, lineHeight:1.7, marginBottom:2 }}
           dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.*?)\*\*/g,"<b>$1</b>") }}/>
       );
     });
@@ -979,7 +1126,7 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
             { label:"SMA 200",   value:q.sma_200?`$${q.sma_200?.toFixed(0)}`:"N/A",
               color: q.price&&q.sma_200?(q.price>q.sma_200?C.green:C.red):C.text },
             { label:"BB UPPER",  value:q.bb_upper?`$${q.bb_upper?.toFixed(2)}`:"N/A" },
-            { label:"TARGET",    value:q.target_mean?`$${q.target_mean?.toFixed(2)}`:"N/A", color:"#60a5fa" },
+            { label:"TARGET",    value:q.target_mean?`$${q.target_mean?.toFixed(2)}`:"N/A", color:C.accent },
             { label:"UPSIDE",    value:q.target_mean&&q.price?`${((q.target_mean/q.price-1)*100).toFixed(1)}%`:"N/A",
               color: q.target_mean&&q.price?(q.target_mean>q.price?C.green:C.red):C.text },
             { label:"CONSENSUS", value:q.recommendation?.toUpperCase()||"N/A",
@@ -999,7 +1146,7 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:14 }}>
           <Panel lift tilt style={{ padding:16 }}>
             <Label>Company</Label>
-            <DataRow label="Name" value={q.long_name || q.symbol} color={C.accent}/>
+            <DataRow label="Name" value={q.long_name || q.symbol} color={C.text}/>
             <DataRow label="Sector" value={q.sector || "N/A"}/>
             <DataRow label="Industry" value={q.industry || "N/A"}/>
             <DataRow label="Exchange" value={q.exchange || "N/A"}/>
@@ -1052,11 +1199,11 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
               color={q.volume_trend>=10?C.green:q.volume_trend<=-10?C.red:C.text}/>
           </Panel>
 
-          <Panel lift tilt accent="#60a5fa" style={{ padding:16 }}>
+          <Panel lift tilt accent={C.accent} style={{ padding:16 }}>
             <Label>Analyst Consensus</Label>
             <DataRow label="Rating" value={(q.recommendation||"N/A").toUpperCase()}
               color={["buy","strong_buy"].includes(q.recommendation)?C.green:q.recommendation==="sell"?C.red:C.yellow}/>
-            <DataRow label="Target Mean" value={`$${num(q.target_mean)}`} color="#60a5fa"/>
+            <DataRow label="Target Mean" value={`$${num(q.target_mean)}`} color={C.accent}/>
             <DataRow label="Target High / Low" value={`$${num(q.target_high)} / $${num(q.target_low)}`}/>
             <DataRow label="Strong Buy" value={q.analyst_strong_buy ?? 0}/>
             <DataRow label="Buy" value={q.analyst_buy ?? 0}/>
@@ -1113,8 +1260,8 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
         <Panel style={{ marginTop:14, padding:14, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
           {aiStatus.any ? (
             <button type="button" onClick={generateReport} disabled={reportLoading} style={{
-              padding:"7px 18px", borderRadius:3, border:`1px solid #60a5fa`,
-              background:reportLoading?"#60a5fa10":"#60a5fa18", color:"#60a5fa", fontSize:11,
+              padding:"7px 18px", borderRadius:3, border:`1px solid ${C.accent}`,
+              background:reportLoading?`${C.accent}10`:`${C.accent}18`, color:C.accent, fontSize:11,
               fontFamily:"'IBM Plex Mono',monospace", cursor:reportLoading?"wait":"pointer", fontWeight:700 }}>
               {reportLoading ? "WRITING REPORT…" : "AI REPORT →"}
             </button>
@@ -1140,9 +1287,9 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
             display:"flex", justifyContent:"space-between", alignItems:"center" }}>
             <Mono style={{ fontSize:13, fontWeight:700, color:C.accent }}>{ticker} — Analyst Report</Mono>
             <span style={{ fontSize:9, padding:"2px 7px", borderRadius:2,
-              background:aiStatus.cohere?"#22c55e18":"#60a5fa18",
-              color:aiStatus.cohere?C.green:"#60a5fa",
-              border:`1px solid ${aiStatus.cohere?C.green:"#60a5fa"}30`,
+              background:aiStatus.cohere?`${C.green}18`:`${C.accent}18`,
+              color:aiStatus.cohere?C.green:C.accent,
+              border:`1px solid ${aiStatus.cohere?C.green:C.accent}40`,
               fontFamily:"'IBM Plex Mono',monospace", fontWeight:600 }}>
               {aiStatus.cohere ? "COHERE FREE" : "ANTHROPIC"}
             </span>
@@ -1203,6 +1350,15 @@ export default function ThesisDashboard() {
   const attrData   = attr.data  ?? {};
   const signalData = signals.data ?? { themes:{}, tickers:{} };
   const signalsFallback = Boolean(signals.data?.fallback);
+  const signalsTickersFallback = Boolean(signals.data?.tickers_fallback);
+
+  useEffect(() => {
+    const themes = Object.keys(signals.data?.themes ?? {});
+    const tickers = Object.keys(signals.data?.tickers ?? {});
+    if (!themes.length || tickers.length >= 10 || signals.loading) return;
+    const id = setInterval(() => signals.refetch(), 25_000);
+    return () => clearInterval(id);
+  }, [signals.data, signals.loading]);
 
   useEffect(() => {
     if (online !== true) return;
@@ -1265,7 +1421,7 @@ export default function ThesisDashboard() {
   ];
 
   return (
-    <div className="thesis-scene" style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13, lineHeight:1.5, display:"flex" }}>
+    <div className="thesis-scene" style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'IBM Plex Sans',system-ui,sans-serif", fontSize:13, lineHeight:1.5, display:"flex" }}>
       <style>{DEPTH_CSS}</style>
       <div className="thesis-main" style={{ display:"flex", width:"100%", minHeight:"100vh" }}>
 
@@ -1279,8 +1435,8 @@ export default function ThesisDashboard() {
           <div style={{
             width: 36, height: 36, borderRadius: 8, background: C.accent, color: C.bg,
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontWeight: 800, fontSize: 14, fontFamily: "'JetBrains Mono', monospace",
-            boxShadow: `0 4px 0 #06080c, 0 8px 20px ${C.accent}44`,
+            fontWeight: 800, fontSize: 14, fontFamily: "'IBM Plex Mono', monospace",
+            boxShadow: `0 4px 0 #000, 0 8px 20px rgba(0,0,0,0.45)`,
             marginBottom: 10,
           }}>T</div>
           <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.03em", color: C.text }}>Thesis</div>
@@ -1641,17 +1797,17 @@ export default function ThesisDashboard() {
                         <div>
                           <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:5 }}>
                             <ThemeTag theme={item.theme}/>
-                            <Mono style={{ fontSize:10, color:"#888888" }}>
+                            <Mono style={{ fontSize:10, color:C.dim }}>
                               {item.source} · {ago(item.published_at)}
                             </Mono>
                           </div>
-                          <div style={{ fontSize:12, color:"#f0f0f0", lineHeight:1.6, marginBottom:6 }}>
+                          <div style={{ fontSize:12, color:C.text, lineHeight:1.6, marginBottom:6 }}>
                             {item.headline}
                           </div>
                           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                            <Mono style={{ fontSize:9, color:"#777777" }}>SENT</Mono>
+                            <Mono style={{ fontSize:9, color:C.dim }}>SENT</Mono>
                             <div style={{ width:80 }}><SentBar score={s?.score}/></div>
-                            {s?.model && <Mono style={{ fontSize:9, color:"#555555" }}>via {s.model}</Mono>}
+                            {s?.model && <Mono style={{ fontSize:9, color:C.dim }}>via {s.model}</Mono>}
                           </div>
                         </div>
                         <div style={{ textAlign:"right" }}>
@@ -1672,7 +1828,17 @@ export default function ThesisDashboard() {
 
         {/* ══ SIGNALS ══ */}
         {tab === "signals" && (
-          <SignalsTab signalData={signalData} signals={signals} signalsError={signals.error} signalsFallback={signalsFallback} />
+          <SignalsTab
+            signalData={signalData}
+            signals={signals}
+            signalsError={signals.error}
+            signalsFallback={signalsFallback}
+            signalsTickersFallback={signalsTickersFallback}
+            onRetrySignals={() => {
+              fetch(`${API}/api/bootstrap`, { method: "POST" }).catch(() => {});
+              setTimeout(() => signals.refetch(), 15_000);
+            }}
+          />
         )}
 
         {/* ══ ATTRIBUTION ══ */}
@@ -1817,6 +1983,7 @@ export default function ThesisDashboard() {
             signalData={signalData}
             attrData={attrData}
             avgSent={avgSent}
+            flowData={flow.data}
             onAnalyze={(tk) => { setAnalyzerFocus(tk); setTab("analyzer"); }}
           />
         )}
