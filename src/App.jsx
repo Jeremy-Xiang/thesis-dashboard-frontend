@@ -446,19 +446,15 @@ function FlowTab({ flowData, flowLoading, flowStatus, onAnalyze, signalData }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 16 }}>
-        <StatTile label="Congress trades" value={stats.congress_trades ?? "—"} sub={status.stonkwhisper ? "StonkWhisper" : "API key needed"} accent={C.accent} loading={flowLoading} />
+        <StatTile label="Congress trades" value={stats.congress_trades ?? "—"} sub={congress?.source === "stonkwhisper" ? "StonkWhisper" : "Public disclosures"} accent={C.accent} loading={flowLoading} />
         <StatTile label="Form 4 filings" value={stats.insider_filings ?? "—"} sub="SEC EDGAR (free)" accent={C.green} loading={flowLoading} />
         <StatTile label="Confluence" value={stats.convergence_hits ?? "—"} sub="overlap w/ signals" accent={C.yellow} loading={flowLoading} />
         <StatTile label="Tracked reps" value={status.watched_politicians?.length ?? 8} sub="Pelosi + watchlist" loading={false} />
       </div>
 
-      {!status.stonkwhisper && (
-        <Panel accent={C.yellow} style={{ padding: 14, marginBottom: 16 }}>
-          <Mono style={{ fontSize: 11, color: C.text, lineHeight: 1.6 }}>
-            Congress feed: add <b>STONKWHISPER_API_KEY</b> on Render (free at{" "}
-            <a href="https://stonkwhisper.com/signup" target="_blank" rel="noreferrer" style={{ color: C.accent }}>stonkwhisper.com/signup</a>
-            , 100 req/day). Insider Form 4 already works via SEC — no key.
-          </Mono>
+      {congress?.message && (
+        <Panel accent={C.accent} style={{ padding: 14, marginBottom: 16 }}>
+          <Mono style={{ fontSize: 11, color: C.muted, lineHeight: 1.6 }}>{congress.message}</Mono>
         </Panel>
       )}
 
@@ -478,6 +474,10 @@ function FlowTab({ flowData, flowLoading, flowStatus, onAnalyze, signalData }) {
                 </div>
                 <Mono style={{ fontSize: 10, color: C.muted, display: "block", marginTop: 4 }}>{t.politician}</Mono>
                 <Mono style={{ fontSize: 9, color: C.dim }}>{t.amount_range || "—"} · filed {t.filed || "—"}</Mono>
+                {t.doc_url && (
+                  <a href={t.doc_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                    style={{ fontSize: 9, color: C.accent, marginTop: 4, display: "inline-block" }}>PTR filing →</a>
+                )}
               </div>
             )) : <Mono style={{ padding: 16, color: C.dim }}>No congress trades yet.</Mono>}
         </Panel>
