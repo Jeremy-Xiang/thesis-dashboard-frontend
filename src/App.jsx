@@ -856,7 +856,8 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
         }
       }
     } catch (e) {
-      setReportError(e.message || "Report failed");
+      const msg = e.message || "Report failed";
+      setReportError(msg.length > 160 ? msg.slice(0, 160) + "…" : msg);
     } finally {
       setReportLoading(false);
     }
@@ -915,7 +916,7 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
       <Panel style={{ marginBottom:16, padding:16 }}>
         <Label>Stock Lookup — Live Market Data</Label>
         <Mono style={{ fontSize:10, color:C.dim, display:"block", marginBottom:10 }}>
-          Live fundamentals + technicals (Yahoo). Optional AI report uses your free Cohere key (same as news sentiment).
+          Live fundamentals + technicals (Yahoo). AI report uses Cohere — if rate-limited you still get a data summary.
         </Mono>
         <Mono style={{ fontSize:9, color: API.includes("localhost") ? C.red : C.dim, display:"block", marginBottom:8 }}>
           API: {API}
