@@ -404,92 +404,340 @@ function SignalsTab({ signalData, signals }) {
   );
 }
 
-// ── Analyzer tab ──────────────────────────────────────────────────────────────
+// ── Analyzer tab — Institutional Stock Report ─────────────────────────────────
 function AnalyzerTab({ news }) {
-  const [text, setText] = useState("");
-  const [res,  setRes]  = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [err,  setErr]  = useState(null);
+  const [ticker,  setTicker]  = useState("");
+  const [loading, setLoading] = useState(false);
+  const [report,  setReport]  = useState("");
+  const [quote,   setQuote]   = useState(null);
+  const [error,   setError]   = useState(null);
+  const [phase,   setPhase]   = useState("idle");
+  const reportRef = React.useRef(null);
 
-  const analyze = async () => {
-    if (!text.trim()) return;
-    setBusy(true); setErr(null); setRes(null);
-    try {
-      const r = await fetch(`${API}/api/sentiment/analyze?text=${encodeURIComponent(text)}`);
-      if (!r.ok) throw new Error(await r.text());
-      setRes(await r.json());
-    } catch(e) { setErr(e.message); }
-    finally { setBusy(false); }
+  React.useEffect(() => {
+    if (reportRef.current) reportRef.current.scrollTop = reportRef.current.scrollHeight;
+  }, [report]);
+
+  const fmt = (v, prefix="", suffix="", dec=2) => {
+    if (v == null || isNaN(v)) return "N/A";
+    if (Math.abs(v) >= 1e12) return `${prefix}${(v/1e12).toFixed(1)}T${suffix}`;
+    if (Math.abs(v) >= 1e9)  return `${prefix}${(v/1e9).toFixed(1)}B${suffix}`;
+    if (Math.abs(v) >= 1e6)  return `${prefix}${(v/1e6).toFixed(1)}M${suffix}`;
+    return `${prefix}${Number(v).toFixed(dec)}${suffix}`;
   };
 
-  const lc = l => l === "positive" ? C.green : l === "negative" ? C.red : C.yellow;
+  const pct = v => v == null ? "N/A" : `${(v*100).toFixed(1)}%`;
+
+  const analyze = async () => {
+    const sym = ticker.trim().toUpperCase();
+    if (!sym) return;
+    setLoading(true); setReport(""); setError(null); setQuote(null); setPhase("fetching");
+    try {
+      // 1. Fetch live data from our backend (Yahoo Finance + Alpha Vantage)
+      const r = await fetch(`${API}/api/analyze/${sym}`);
+      if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Not found"); }
+      const data = await r.json();
+      setQuote(data);
+      setPhase("analyzing");
+
+      // 2. Build data context for Claude
+      const ctx = `
+LIVE MARKET DATA FOR ${sym} (${new Date().toUTCString()}):
+Company: ${data.long_name || sym}
+Sector: ${data.sector || "N/A"} | Industry: ${data.industry || "N/A"}
+Employees: ${data.employees?.toLocaleString() || "N/A"}
+Price: $${data.price?.toFixed(2)} | Prev Close: $${data.prev_close?.toFixed(2)}
+Change: ${data.price && data.prev_close ? ((data.price/data.prev_close-1)*100).toFixed(2)+"%" : "N/A"}
+52W High: $${data.week52_high?.toFixed(2)} | 52W Low: $${data.week52_low?.toFixed(2)}
+Position in 52W Range: ${data.pct_of_52w_range != null ? data.pct_of_52w_range+"%" : "N/A"}
+Market Cap: ${fmt(data.market_cap,"$")} | Avg Volume (30d): ${fmt(data.avg_volume,"","",0)}
+Volume Trend (10d vs 30d avg): ${data.volume_trend != null ? (data.volume_trend>=0?"+":"")+data.volume_trend+"%" : "N/A"}
+
+VALUATION:
+P/E (TTM): ${data.pe_ttm?.toFixed(2) || "N/A"}
+Forward P/E: ${data.forward_pe?.toFixed(2) || "N/A"}
+PEG Ratio: ${data.peg_ratio?.toFixed(2) || "N/A"}
+Price/Sales: ${data.price_to_sales?.toFixed(2) || "N/A"}
+Price/Book: ${data.price_to_book?.toFixed(2) || "N/A"}
+EV/EBITDA: ${data.ev_ebitda?.toFixed(2) || "N/A"}
+EV/Revenue: ${data.ev_revenue?.toFixed(2) || "N/A"}
+
+FINANCIALS:
+Revenue (TTM): ${fmt(data.revenue,"$")}
+Gross Margin: ${pct(data.gross_margins)}
+Operating Margin: ${pct(data.operating_margins)}
+Profit Margin: ${pct(data.profit_margins)}
+Revenue Growth YOY: ${pct(data.revenue_growth)}
+Earnings Growth: ${pct(data.earnings_growth)}
+Free Cash Flow: ${fmt(data.free_cashflow,"$")}
+Total Cash: ${fmt(data.total_cash,"$")}
+Total Debt: ${fmt(data.total_debt,"$")}
+ROE: ${pct(data.roe)} | ROA: ${pct(data.roa)}
+
+RECENT EARNINGS (last 4 quarters):
+${(data.earnings_history||[]).map(e=>`${e.date}: EPS Actual $${e.actual?.toFixed(2)||"N/A"} vs Est $${e.estimate?.toFixed(2)||"N/A"} (${e.actual&&e.estimate?(((e.actual-e.estimate)/Math.abs(e.estimate))*100).toFixed(1)+"%":"N/A"} surprise)`).join("\n")}
+
+TECHNICALS (computed from 2y daily price history):
+RSI(14): ${data.rsi_14?.toFixed(2) || "N/A"} ${data.rsi_14>70?"[OVERBOUGHT]":data.rsi_14<30?"[OVERSOLD]":""}
+MACD: ${data.macd?.toFixed(4) || "N/A"} | Signal: ${data.macd_signal?.toFixed(4) || "N/A"} | Histogram: ${data.macd_hist?.toFixed(4) || "N/A"} ${data.macd_hist>0?"[BULLISH MOMENTUM]":"[BEARISH MOMENTUM]"}
+SMA(20):  $${data.sma_20?.toFixed(2) || "N/A"} ${data.price&&data.sma_20?(data.price>data.sma_20?"[ABOVE — bullish]":"[BELOW — bearish]"):""}
+SMA(50):  $${data.sma_50?.toFixed(2) || "N/A"} ${data.price&&data.sma_50?(data.price>data.sma_50?"[ABOVE — bullish]":"[BELOW — bearish]"):""}
+SMA(200): $${data.sma_200?.toFixed(2) || "N/A"} ${data.price&&data.sma_200?(data.price>data.sma_200?"[ABOVE — bullish]":"[BELOW — bearish]"):""}
+Bollinger Bands: Upper $${data.bb_upper?.toFixed(2)||"N/A"} | Mid $${data.bb_mid?.toFixed(2)||"N/A"} | Lower $${data.bb_lower?.toFixed(2)||"N/A"}
+ATR(14): $${data.atr_14?.toFixed(2) || "N/A"} (daily volatility measure)
+
+ANALYST CONSENSUS:
+Recommendation: ${data.recommendation?.toUpperCase() || "N/A"}
+Target Mean: $${data.target_mean?.toFixed(2) || "N/A"} | Upside: ${data.target_mean&&data.price?((data.target_mean/data.price-1)*100).toFixed(1)+"%":"N/A"}
+Target High: $${data.target_high?.toFixed(2) || "N/A"} | Target Low: $${data.target_low?.toFixed(2) || "N/A"}
+Analyst Breakdown: ${data.analyst_strong_buy||0} Strong Buy | ${data.analyst_buy||0} Buy | ${data.analyst_hold||0} Hold | ${data.analyst_sell||0} Sell | ${data.analyst_strong_sell||0} Strong Sell
+
+POSITIONING:
+Beta: ${data.beta?.toFixed(2) || "N/A"}
+Short % Float: ${pct(data.short_pct_float)}
+Insider Ownership: ${pct(data.insider_pct)}
+Institutional Ownership: ${pct(data.institution_pct)}
+Dividend Yield: ${data.dividend_yield ? pct(data.dividend_yield) : "None"}
+`.trim();
+
+      // 3. Stream Claude report
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4000,
+          stream: true,
+          messages: [{ role: "user", content: `You are a senior analyst at a top-tier hedge fund. Using the live market data below, produce a complete institutional-grade stock analysis report for ${sym}.
+
+${ctx}
+
+Format with these exact sections using ## headers:
+
+## 1. Company Snapshot
+What the company does, market position, key stats table.
+
+## 2. Valuation Analysis
+P/E, Forward P/E, PEG, P/S, EV/EBITDA vs sector averages. State: overvalued, fairly valued, or undervalued.
+
+## 3. Financial Health
+Revenue growth, margins, FCF, balance sheet quality.
+
+## 4. Technical Analysis
+RSI interpretation, MACD signal, price vs SMA(20/50/200), 52-week positioning, trend direction, support/resistance levels.
+
+## 5. Sentiment & Positioning
+Short interest, insider/institutional ownership, analyst consensus, upside to target.
+
+## 6. Risk Assessment
+Top 3-5 specific risks to this stock right now.
+
+## 7. Bull vs Bear Case
+**Bull:** 3 strongest arguments with catalysts
+**Bear:** 3 strongest arguments with downside scenarios
+
+## 8. Competitive Positioning
+Compare vs top 2-3 competitors in a table (growth, margins, valuation).
+
+## 9. Final Verdict
+- Overall: BULLISH / NEUTRAL / BEARISH
+- Short-term (1-3 months): price range
+- Long-term (12 months): price target + reasoning
+- Key levels to watch
+- Biggest upcoming catalyst
+
+## 10. Probability Scenarios
+- Bull case (X%): target + conditions
+- Base case (X%): target + conditions
+- Bear case (X%): target + conditions
+
+Be specific, quantitative, direct. Write like a $10B fund depends on this.` }],
+        }),
+      });
+
+      const reader  = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let   buf     = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() || "";
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const j = JSON.parse(line.slice(6));
+              if (j.type === "content_block_delta" && j.delta?.text) {
+                setReport(prev => prev + j.delta.text);
+              }
+            } catch {}
+          }
+        }
+      }
+      setPhase("done");
+    } catch(e) { setError(e.message); setPhase("idle"); }
+    finally { setLoading(false); }
+  };
+
+  // Markdown renderer
+  const renderMd = (text) => {
+    if (!text) return null;
+    return text.split("\n").map((line, i) => {
+      if (line.startsWith("## ")) return (
+        <div key={i} style={{ marginTop:20, marginBottom:8 }}>
+          <Mono style={{ fontSize:10, color:C.accent, letterSpacing:"0.1em", textTransform:"uppercase" }}>
+            {line.replace("## ","")}
+          </Mono>
+          <div style={{ height:1, background:C.border2, marginTop:4 }}/>
+        </div>
+      );
+      if (line.startsWith("### ")) return (
+        <div key={i} style={{ fontSize:12, fontWeight:600, color:"#60a5fa", marginTop:12, marginBottom:4 }}>
+          {line.replace("### ","")}
+        </div>
+      );
+      if (line.startsWith("| ") && line.includes("|")) return (
+        <div key={i} style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:10,
+          color:C.muted, borderBottom:`1px solid ${C.border}`, padding:"4px 0" }}>
+          {line}
+        </div>
+      );
+      if (line.startsWith("- ") || line.startsWith("• ")) return (
+        <div key={i} style={{ display:"flex", gap:8, marginBottom:3 }}>
+          <span style={{ color:C.accent, flexShrink:0 }}>▸</span>
+          <span style={{ fontSize:12, color:C.text, lineHeight:1.6 }}>
+            {line.replace(/^[-•] /,"").replace(/\*\*(.*?)\*\*/g,"$1")}
+          </span>
+        </div>
+      );
+      if (line.startsWith("**") && line.endsWith("**")) return (
+        <div key={i} style={{ fontSize:12, fontWeight:700, color:C.text, marginTop:8, marginBottom:2 }}>
+          {line.replace(/\*\*/g,"")}
+        </div>
+      );
+      if (!line.trim()) return <div key={i} style={{ height:6 }}/>;
+      return (
+        <div key={i} style={{ fontSize:12, color:"#94a3b8", lineHeight:1.7, marginBottom:2 }}
+          dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.*?)\*\*/g,"<b>$1</b>") }}/>
+      );
+    });
+  };
+
+  const q = quote;
+  const pctChange = q?.price && q?.prev_close
+    ? ((q.price/q.prev_close-1)*100) : null;
 
   return (
     <div>
+      {/* Input */}
       <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, padding:16, marginBottom:16 }}>
-        <Label>Score a headline</Label>
-        <div style={{ display:"flex", gap:8, marginBottom:12 }}>
-          <input value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&analyze()}
-            placeholder="Paste any financial headline and hit Enter"
+        <Label>Institutional Stock Analysis</Label>
+        <div style={{ display:"flex", gap:8 }}>
+          <input value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())}
+            onKeyDown={e=>e.key==="Enter"&&!loading&&analyze()}
+            placeholder="NVDA, AAPL, MSFT, LMT, SIGA, BRK-B…"
             style={{ flex:1, padding:"7px 10px", background:C.bg, border:`1px solid ${C.border2}`,
-              borderRadius:3, color:C.text, fontSize:12, fontFamily:"'IBM Plex Mono',monospace", outline:"none" }} />
-          <button onClick={analyze} disabled={busy||!text.trim()} style={{
-            padding:"7px 18px", borderRadius:3, border:`1px solid ${C.accent}`,
-            background:busy?C.border:C.accent+"18", color:C.accent, fontSize:11,
-            fontFamily:"'IBM Plex Mono',monospace", cursor:busy?"not-allowed":"pointer",
-            fontWeight:600, letterSpacing:"0.05em" }}>
-            {busy ? "…" : "SCORE →"}
+              borderRadius:3, color:C.text, fontSize:13, fontFamily:"'IBM Plex Mono',monospace", outline:"none" }}/>
+          <button onClick={analyze} disabled={loading||!ticker.trim()} style={{
+            padding:"7px 22px", borderRadius:3, border:`1px solid ${C.accent}`,
+            background:loading?C.border:C.accent+"18", color:C.accent, fontSize:11,
+            fontFamily:"'IBM Plex Mono',monospace", cursor:loading?"not-allowed":"pointer",
+            fontWeight:700, letterSpacing:"0.05em", minWidth:110 }}>
+            {loading ? (phase==="fetching"?"FETCHING…":"ANALYZING…") : "ANALYZE →"}
           </button>
         </div>
-        {err && <Mono style={{ fontSize:11, color:C.red }}>✗ {err}</Mono>}
-        {res && (
-          <div style={{ background:C.bg, border:`1px solid ${C.border2}`, borderRadius:3, padding:14,
-            display:"flex", gap:24, flexWrap:"wrap", alignItems:"center" }}>
-            {[
-              { label:"LABEL",    val:res.label?.toUpperCase(),                            col:lc(res.label) },
-              { label:"SCORE",    val:res.score?.toFixed(3),                               col:C.text },
-              { label:"COMPOUND", val:`${res.compound>=0?"+":""}${res.compound?.toFixed(3)}`, col:res.compound>=0?C.green:C.red },
-            ].map(({ label, val, col }) => (
-              <div key={label}>
-                <Label>{label}</Label>
-                <Mono style={{ fontSize:18, fontWeight:700, color:col }}>{val}</Mono>
-              </div>
-            ))}
-            <Mono style={{ marginLeft:"auto", fontSize:10, color:C.dim }}>via {res.model}</Mono>
-          </div>
-        )}
+        {error && <Mono style={{ fontSize:11, color:C.red, marginTop:8 }}>✗ {error}</Mono>}
       </div>
 
-      {/* Scored feed */}
-      <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
-        <div style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}` }}>
-          <Label>Recent scored headlines</Label>
-        </div>
-        {(news ?? []).slice(0,20).map((item, i) => {
-          const s   = item.sentiment;
-          const col = s?.label==="positive" ? C.green : s?.label==="negative" ? C.red : C.yellow;
-          return (
-            <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start",
-              padding:"10px 16px", borderBottom:`1px solid ${C.border}`, gap:16 }}>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:12, color:C.text, lineHeight:1.5, marginBottom:4 }}>{item.headline}</div>
-                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                  <ThemeTag theme={item.theme} />
-                  <Mono style={{ fontSize:10, color:C.dim }}>{item.source} · {ago(item.published_at)}</Mono>
-                </div>
-              </div>
-              <div style={{ textAlign:"right", minWidth:80 }}>
-                <Mono style={{ fontSize:13, fontWeight:700, color:col }}>
-                  {s?.compound>=0?"+":""}{s?.compound?.toFixed(2)}
-                </Mono>
-                <div style={{ fontSize:9, color:col, textTransform:"uppercase", marginTop:2, fontFamily:"'IBM Plex Mono',monospace" }}>
-                  {s?.label}
-                </div>
-              </div>
+      {/* Quote strip */}
+      {q && (
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4,
+          padding:"12px 16px", marginBottom:16,
+          display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))", gap:12 }}>
+          {[
+            { label:"PRICE",     value:`$${q.price?.toFixed(2)}`,   color: pctChange>=0?C.green:C.red },
+            { label:"CHANGE",    value:`${pctChange>=0?"+":""}${pctChange?.toFixed(2)}%`, color:pctChange>=0?C.green:C.red },
+            { label:"52W HIGH",  value:`$${q.week52_high?.toFixed(2)}` },
+            { label:"52W LOW",   value:`$${q.week52_low?.toFixed(2)}` },
+            { label:"52W POS",   value:q.pct_of_52w_range!=null?`${q.pct_of_52w_range}%`:"N/A",
+              color: q.pct_of_52w_range>80?C.green:q.pct_of_52w_range<20?C.red:C.yellow },
+            { label:"MKT CAP",   value:fmt(q.market_cap,"$") },
+            { label:"P/E TTM",   value:q.pe_ttm?.toFixed(1)||"N/A" },
+            { label:"FWD P/E",   value:q.forward_pe?.toFixed(1)||"N/A" },
+            { label:"RSI(14)",   value:q.rsi_14?.toFixed(1)||"N/A",
+              color: q.rsi_14>70?C.red:q.rsi_14<30?C.green:C.text },
+            { label:"MACD HIST", value:q.macd_hist!=null?(q.macd_hist>=0?"+":"")+q.macd_hist?.toFixed(3):"N/A",
+              color: q.macd_hist>=0?C.green:C.red },
+            { label:"SMA 200",   value:q.sma_200?`$${q.sma_200?.toFixed(0)}`:"N/A",
+              color: q.price&&q.sma_200?(q.price>q.sma_200?C.green:C.red):C.text },
+            { label:"BB UPPER",  value:q.bb_upper?`$${q.bb_upper?.toFixed(2)}`:"N/A" },
+            { label:"TARGET",    value:q.target_mean?`$${q.target_mean?.toFixed(2)}`:"N/A", color:"#60a5fa" },
+            { label:"UPSIDE",    value:q.target_mean&&q.price?`${((q.target_mean/q.price-1)*100).toFixed(1)}%`:"N/A",
+              color: q.target_mean&&q.price?(q.target_mean>q.price?C.green:C.red):C.text },
+            { label:"CONSENSUS", value:q.recommendation?.toUpperCase()||"N/A",
+              color:["buy","strong_buy"].includes(q.recommendation)?C.green:
+                    q.recommendation==="sell"?C.red:C.yellow },
+            { label:"BETA",      value:q.beta?.toFixed(2)||"N/A" },
+            { label:"SHORT %",   value:q.short_pct_float?pct(q.short_pct_float):"N/A" },
+            { label:"VOL TREND", value:q.volume_trend!=null?(q.volume_trend>=0?"+":"")+q.volume_trend+"%":"N/A",
+              color: q.volume_trend>=10?C.green:q.volume_trend<=-10?C.red:C.text },
+          ].map(({label,value,color=C.text})=>(
+            <div key={label}>
+              <Mono style={{ fontSize:9, color:C.muted, letterSpacing:"0.1em",
+                textTransform:"uppercase", display:"block", marginBottom:3 }}>{label}</Mono>
+              <Mono style={{ fontSize:14, fontWeight:700, color }}>{value}</Mono>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {/* Report */}
+      {report && (
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
+          <div style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}`,
+            display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <Mono style={{ fontSize:13, fontWeight:700, color:C.accent }}>{ticker}</Mono>
+            <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+              <span style={{ fontSize:9, padding:"2px 7px", borderRadius:2,
+                background:C.green+"18", color:C.green, border:`1px solid ${C.green}30`,
+                fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.05em", fontWeight:600 }}>LIVE DATA</span>
+              <span style={{ fontSize:9, padding:"2px 7px", borderRadius:2,
+                background:"#60a5fa18", color:"#60a5fa", border:"1px solid #60a5fa30",
+                fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.05em", fontWeight:600 }}>AI ANALYSIS</span>
+              <Mono style={{ fontSize:10, color:C.dim }}>
+                {new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}
+              </Mono>
+            </div>
+          </div>
+          <div ref={reportRef} style={{ padding:"16px 20px", maxHeight:600,
+            overflowY:"auto", lineHeight:1.6 }}>
+            {renderMd(report)}
+            {loading && <span style={{ display:"inline-block", width:2, height:14,
+              background:C.accent, marginLeft:2, animation:"blink 1s step-end infinite",
+              verticalAlign:"text-bottom" }}/>}
+          </div>
+        </div>
+      )}
+
+      {!loading && !report && !error && (
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4,
+          padding:48, textAlign:"center" }}>
+          <Mono style={{ fontSize:11, color:C.muted, display:"block", marginBottom:16 }}>
+            Enter any ticker for a full institutional report — live data + AI analysis
+          </Mono>
+          <div style={{ display:"flex", gap:8, justifyContent:"center", flexWrap:"wrap" }}>
+            {["NVDA","AAPL","MSFT","TSLA","GOOGL","SIGA","LMT","CEG","PWR","RTX"].map(t=>(
+              <button key={t} onClick={()=>setTicker(t)} style={{
+                padding:"3px 10px", borderRadius:2, border:`1px solid ${C.border2}`,
+                background:"transparent", color:C.muted, fontSize:10,
+                fontFamily:"'IBM Plex Mono',monospace", cursor:"pointer" }}>{t}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <style>{`@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}`}</style>
     </div>
   );
 }
