@@ -1184,16 +1184,24 @@ export default function ThesisDashboard() {
   ];
 
   return (
-    <div style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13, lineHeight:1.5, display:"flex" }}>
+    <div className="thesis-scene" style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13, lineHeight:1.5, display:"flex" }}>
       <style>{DEPTH_CSS}</style>
+      <div className="thesis-main" style={{ display:"flex", width:"100%", minHeight:"100vh" }}>
 
       <aside style={{
-        width: 220, flexShrink: 0, background: C.surface,
-        borderRight: `1px solid ${C.border}`, padding: "16px 12px",
+        ...panelBase({ borderRadius: 0, marginBottom: 0, borderRight: `1px solid ${C.border}`, borderLeft: "none" }),
+        width: 220, flexShrink: 0, padding: "16px 12px",
         display: "flex", flexDirection: "column", minHeight: "100vh",
         position: "sticky", top: 0, alignSelf: "flex-start",
       }}>
         <div style={{ padding: "4px 8px 20px", borderBottom: `1px solid ${C.border}`, marginBottom: 12 }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 8, background: C.accent, color: C.bg,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontWeight: 800, fontSize: 14, fontFamily: "'JetBrains Mono', monospace",
+            boxShadow: `0 4px 0 #06080c, 0 8px 20px ${C.accent}44`,
+            marginBottom: 10,
+          }}>T</div>
           <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.03em", color: C.text }}>Thesis</div>
           <Mono style={{ fontSize: 9, color: C.dim, display: "block", marginTop: 4 }}>research dashboard</Mono>
         </div>
@@ -1224,7 +1232,7 @@ export default function ThesisDashboard() {
         </div>
       )}
 
-      <main style={{ padding: "24px 28px", maxWidth: 1280 }}>
+      <main className="thesis-main" style={{ padding: "24px 28px", maxWidth: 1280, animation: "fadeUp 0.4s ease" }}>
 
         {/* ══ OVERVIEW ══ */}
         {tab === "overview" && (<>
@@ -1723,6 +1731,7 @@ export default function ThesisDashboard() {
         )}
 
       </main>
+      </div>
       </div>
     </div>
   );
