@@ -558,6 +558,10 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
         <Mono style={{ fontSize:10, color:C.dim, display:"block", marginBottom:10 }}>
           Live fundamentals + technicals (Yahoo). Optional AI report uses your free Cohere key (same as news sentiment).
         </Mono>
+        <Mono style={{ fontSize:9, color: API.includes("localhost") ? C.red : C.dim, display:"block", marginBottom:8 }}>
+          API: {API}
+          {API.includes("localhost") && " — wrong for production; set VITE_API_URL on Vercel"}
+        </Mono>
         <div style={{ display:"flex", gap:8 }}>
           <input value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())}
             onKeyDown={e=>e.key==="Enter"&&!loading&&analyze()}
@@ -573,6 +577,11 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
           </button>
         </div>
         {error && <Mono style={{ fontSize:11, color:C.red, marginTop:8 }}>✗ {error}</Mono>}
+        {q?.fundamentals_error && (
+          <Mono style={{ fontSize:10, color:C.yellow, marginTop:6 }}>
+            ⚠ Fundamentals: {q.fundamentals_error}
+          </Mono>
+        )}
         <div style={{ marginTop:10, display:"flex", gap:8, alignItems:"center" }}>
           <button type="button" onClick={() => setShowAgentPrompt(v => !v)} style={{
             background:"transparent", border:`1px solid ${C.border2}`, borderRadius:2,
