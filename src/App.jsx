@@ -9,12 +9,40 @@ const API =
     ? "https://thesis-dashboard-api.onrender.com"
     : "http://localhost:8000");
 
+const THEME_TICKERS = {
+  "AI Infrastructure": ["NVDA","AMD","TSM","AVGO","MRVL","MSFT","GOOGL","META","SMCI","ARM"],
+  "Defense": ["LMT","RTX","NOC","GD","HII","BA","LDOS","CACI","KTOS","PLTR"],
+  "Energy Transition": ["NEE","CEG","VST","FSLR","ENPH","NRG","ETN","PWR","BE","OKE"],
+  "Biodefense & Pandemic": ["MRNA","BNTX","PFE","GILD","REGN","ABBV","SIGA","EBS","BIO","QDEL","ILMN","PACB"],
+  "Healthcare Infrastructure": ["UNH","JNJ","ABT","TMO","DHR","ISRG","BSX","MDT","A","IQV"],
+};
+
 const THEMES = {
-  "AI Infrastructure":         { color: C.ai,      icon: "AI",   short: "AI"       },
-  "Defense":                   { color: C.defense,  icon: "DEF",  short: "DEF"      },
-  "Energy Transition":         { color: C.energy,   icon: "NRG",  short: "NRG"      },
-  "Biodefense & Pandemic":     { color: C.bio,      icon: "BIO",  short: "BIO"      },
-  "Healthcare Infrastructure": { color: C.health,   icon: "MED",  short: "MED"      },
+  "AI Infrastructure":         { color: C.ai,      icon: "AI",   short: "AI",   alloc: 0.48 },
+  "Defense":                   { color: C.defense,  icon: "DEF",  short: "DEF",  alloc: 0.25 },
+  "Energy Transition":         { color: C.energy,   icon: "NRG",  short: "NRG",  alloc: 0.10 },
+  "Biodefense & Pandemic":     { color: C.bio,      icon: "BIO",  short: "BIO",  alloc: 0.10 },
+  "Healthcare Infrastructure": { color: C.health,   icon: "MED",  short: "MED",  alloc: 0.07 },
+};
+
+const BASE_CAPITAL = 15_000;
+const MAX_POSITION_PCT = 0.05;
+
+const themeForTicker = (tk) => {
+  for (const [name, list] of Object.entries(THEME_TICKERS)) {
+    if (list.includes(tk)) return name;
+  }
+  return null;
+};
+
+const suggestPositionSize = (tk) => {
+  const theme = themeForTicker(tk);
+  if (!theme) return null;
+  const cfg = THEMES[theme];
+  const n = THEME_TICKERS[theme]?.length || 1;
+  const slot = (BASE_CAPITAL * cfg.alloc) / n;
+  const cap = BASE_CAPITAL * MAX_POSITION_PCT;
+  return Math.round(Math.min(slot, cap));
 };
 
 const PERIODS = ["1m","3m","6m","1y","3y"];
@@ -187,7 +215,7 @@ function SignalsTab({ signalData, signals }) {
   const tickerSigs = signalData?.tickers ?? {};
 
   const themeTickerMap = {};
-  Object.entries(THEMES).forEach(([t, cfg]) => { (cfg.tickers ?? []).forEach(tk => { themeTickerMap[tk] = t; }); });
+  Object.entries(THEME_TICKERS).forEach(([t, list]) => { list.forEach(tk => { themeTickerMap[tk] = t; }); });
 
   const filtered = themeFilter === "All"
     ? Object.entries(tickerSigs)
@@ -386,9 +414,177 @@ function SignalsTab({ signalData, signals }) {
   );
 }
 
+// ── Framework tab — THESIS investment process ─────────────────────────────────
+function FrameworkTab({ portfolio, signalData, attrData, avgSent, onAnalyze }) {
+  const [journal, setJournal] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("thesis_journal") || "[]"); }
+    catch { return []; }
+  });
+  const [note, setNote] = useState("");
+
+  const attrRows = Object.entries(attrData || {})
+    .filter(([k]) => k !== "_portfolio")
+    .map(([name, v]) => ({ name, alpha: v.alpha, themeReturn: v.theme_return }));
+
+  const tickerSigs = signalData?.tickers ?? {};
+  const buys = [];
+  const trims = [];
+  const watch = [];
+
+  Object.entries(tickerSigs).forEach(([tk, sig]) => {
+    const prob = sig.outperform_prob ?? 0.5;
+    const sent = avgSent[tk] ?? 0.5;
+    const theme = themeForTicker(tk);
+    const themeAlpha = attrRows.find(r => r.name === theme)?.alpha ?? 0;
+    const row = { tk, prob, sent, signal: sig.signal, theme, themeAlpha, size: suggestPositionSize(tk) };
+
+    if (prob >= 0.6 && sent >= 0.55) {
+      const tier = prob >= 0.65 && sent >= 0.58 && themeAlpha > 0 ? "A" : prob >= 0.62 ? "B" : "C";
+      buys.push({ ...row, tier });
+    } else if (prob <= 0.4 || sent < 0.4 || sig.signal === "TRIM") {
+      trims.push(row);
+    } else if (prob >= 0.55) {
+      watch.push(row);
+    }
+  });
+
+  buys.sort((a, b) => b.prob - a.prob);
+  trims.sort((a, b) => a.prob - b.prob);
+
+  const saveNote = () => {
+    if (!note.trim()) return;
+    const entry = { date: new Date().toISOString().slice(0, 10), text: note.trim() };
+    const next = [entry, ...journal].slice(0, 20);
+    setJournal(next);
+    localStorage.setItem("thesis_journal", JSON.stringify(next));
+    setNote("");
+  };
+
+  const ActionRow = ({ row, type }) => (
+    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+      padding:"10px 12px", borderBottom:`1px solid ${C.border}`,
+      cursor:"pointer" }}
+      onClick={() => onAnalyze(row.tk)}
+      onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; e.currentTarget.style.transform = "translateX(4px)"; }}
+      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.transform = "none"; }}>
+      <div>
+        <Mono style={{ fontSize:13, fontWeight:700, color:C.accent }}>{row.tk}</Mono>
+        <Mono style={{ fontSize:9, color:C.muted, display:"block", marginTop:2 }}>
+          {row.theme?.split(" ")[0] || "—"} · signal {row.signal} · {(row.prob*100).toFixed(0)}% · sent {row.sent.toFixed(2)}
+        </Mono>
+      </div>
+      <div style={{ textAlign:"right" }}>
+        {type === "buy" && row.tier && (
+          <Mono style={{ fontSize:10, color: row.tier==="A"?C.green:row.tier==="B"?C.yellow:C.muted }}>
+            TIER {row.tier}
+          </Mono>
+        )}
+        {row.size && <Mono style={{ fontSize:11, color:C.text, display:"block" }}>~${row.size}</Mono>}
+        <Mono style={{ fontSize:9, color:C.dim }}>ANALYZE →</Mono>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <Panel style={{ marginBottom:14, padding:18 }}>
+        <Label>THESIS Framework</Label>
+        <div style={{ fontSize:13, color:C.muted, lineHeight:1.65, marginTop:6 }}>
+          Systematic process: <b style={{color:C.text}}>Themes → Signals → Evidence → Sentiment → Invest → Review</b>.
+          Only size positions when multiple signals align. Not financial advice — edge comes from discipline.
+        </div>
+      </Panel>
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:8, marginBottom:14 }}>
+        {[
+          { k:"T", t:"Themes", d:"Attribution alpha" },
+          { k:"H", t:"Heuristics", d:"ML BUY/TRIM" },
+          { k:"E", t:"Evidence", d:"Analyzer" },
+          { k:"S", t:"Sentiment", d:"News NLP" },
+          { k:"I", t:"Invest", d:"Size & entry" },
+          { k:"S", t:"Review", d:"Journal" },
+        ].map(({k,t,d}) => (
+          <Panel key={k} lift style={{ padding:"12px", textAlign:"center" }}>
+            <Mono style={{ fontSize:18, fontWeight:800, color:C.accent }}>{k}</Mono>
+            <Mono style={{ fontSize:10, color:C.text, display:"block", marginTop:4 }}>{t}</Mono>
+            <Mono style={{ fontSize:8, color:C.dim }}>{d}</Mono>
+          </Panel>
+        ))}
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
+        <Panel lift accent={C.green} style={{ padding:0, overflow:"hidden" }}>
+          <div style={{ padding:"12px 16px", borderBottom:`1px solid ${C.border}` }}>
+            <Mono style={{ fontSize:12, fontWeight:700, color:C.green }}>BUY QUEUE ({buys.length})</Mono>
+            <Mono style={{ fontSize:9, color:C.muted, display:"block" }}>prob ≥60% · sentiment ≥0.55</Mono>
+          </div>
+          {buys.length ? buys.slice(0, 8).map(r => <ActionRow key={r.tk} row={r} type="buy" />)
+            : <Mono style={{ padding:16, fontSize:11, color:C.dim }}>No BUY candidates right now.</Mono>}
+        </Panel>
+
+        <Panel lift accent={C.red} style={{ padding:0, overflow:"hidden" }}>
+          <div style={{ padding:"12px 16px", borderBottom:`1px solid ${C.border}` }}>
+            <Mono style={{ fontSize:12, fontWeight:700, color:C.red }}>TRIM / EXIT ({trims.length})</Mono>
+            <Mono style={{ fontSize:9, color:C.muted, display:"block" }}>prob ≤40% or sentiment &lt;0.40</Mono>
+          </div>
+          {trims.length ? trims.slice(0, 8).map(r => <ActionRow key={r.tk} row={r} type="trim" />)
+            : <Mono style={{ padding:16, fontSize:11, color:C.dim }}>No trim signals.</Mono>}
+        </Panel>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:14 }}>
+        <Panel lift style={{ padding:16 }}>
+          <Label>Position rules</Label>
+          <div style={{ fontSize:11, color:C.muted, lineHeight:1.8, marginTop:8 }}>
+            Base capital: <b style={{color:C.accent}}>${BASE_CAPITAL.toLocaleString()}</b><br/>
+            Max per stock: <b style={{color:C.text}}>{(MAX_POSITION_PCT*100)}%</b> (~${BASE_CAPITAL*MAX_POSITION_PCT})<br/>
+            Max new trades/week: <b style={{color:C.text}}>2</b><br/>
+            Stop-loss: <b style={{color:C.red}}>-15%</b> from entry<br/>
+            Cash reserve: <b style={{color:C.text}}>10%</b>
+          </div>
+        </Panel>
+        <Panel lift style={{ padding:16 }}>
+          <Label>Theme alpha (vs SPY)</Label>
+          {attrRows.length ? attrRows.map(r => (
+            <div key={r.name} style={{ display:"flex", justifyContent:"space-between", padding:"4px 0",
+              borderBottom:`1px solid ${C.border}` }}>
+              <Mono style={{ fontSize:10, color:THEMES[r.name]?.color || C.muted }}>{THEMES[r.name]?.short || r.name}</Mono>
+              <Mono style={{ fontSize:10, color:r.alpha>=0?C.green:C.red }}>{fp(r.alpha)}</Mono>
+            </div>
+          )) : <Mono style={{ fontSize:10, color:C.dim }}>Loading attribution…</Mono>}
+        </Panel>
+        <Panel lift style={{ padding:16 }}>
+          <Label>Watchlist</Label>
+          {watch.slice(0, 5).map(r => (
+            <div key={r.tk} onClick={() => onAnalyze(r.tk)} style={{ cursor:"pointer", padding:"4px 0",
+              borderBottom:`1px solid ${C.border}` }}>
+              <Mono style={{ fontSize:11, color:C.text }}>{r.tk}</Mono>
+              <Mono style={{ fontSize:9, color:C.dim }}>{(r.prob*100).toFixed(0)}% prob</Mono>
+            </div>
+          ))}
+        </Panel>
+      </div>
+
+      <Panel lift style={{ padding:16 }}>
+        <Label>Trade journal</Label>
+        <div style={{ display:"flex", gap:8, marginTop:10, marginBottom:12 }}>
+          <Input3D value={note} onChange={e => setNote(e.target.value)}
+            placeholder="What you bought/sold and why…" />
+          <Btn onClick={saveNote}>LOG</Btn>
+        </div>
+        {journal.map((e, i) => (
+          <div key={i} style={{ fontSize:11, color:C.muted, padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
+            <Mono style={{ color:C.dim, marginRight:8 }}>{e.date}</Mono>{e.text}
+          </div>
+        ))}
+      </Panel>
+    </div>
+  );
+}
+
 // ── Analyzer tab — live market data (no in-app AI) ─────────────────────────────
-function AnalyzerTab() {
-  const [ticker, setTicker] = useState("");
+function AnalyzerTab({ initialTicker = "", onTickerApplied }) {
+  const [ticker, setTicker] = useState(initialTicker);
   const [loading, setLoading] = useState(false);
   const [quote, setQuote] = useState(null);
   const [error, setError] = useState(null);
@@ -398,6 +594,11 @@ function AnalyzerTab() {
   const [aiStatus, setAiStatus] = useState({ cohere: false, anthropic: false, any: false });
   const [showAgentPrompt, setShowAgentPrompt] = useState(false);
   const reportRef = useRef(null);
+
+  useEffect(() => {
+    if (initialTicker) setTicker(initialTicker);
+    onTickerApplied?.();
+  }, [initialTicker]);
 
   useEffect(() => {
     fetch(`${API}/api/analyze/ai-status`).then(r => r.ok ? r.json() : null)
@@ -802,6 +1003,7 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
 // ── Main app ──────────────────────────────────────────────────────────────────
 export default function ThesisDashboard() {
   const [tab,         setTab]         = useState("overview");
+  const [analyzerFocus, setAnalyzerFocus] = useState("");
   const [themeFilter, setThemeFilter] = useState(null);
   const [newsFilter,  setNewsFilter]  = useState("All");
   const [period,      setPeriod]      = useState("3y");
@@ -898,7 +1100,7 @@ export default function ThesisDashboard() {
 
         {/* Nav tabs */}
         <nav style={{ display:"flex", alignItems:"stretch", gap:0 }}>
-          {[["overview","OVERVIEW"],["themes","THEMES"],["news","NEWS"],["signals","SIGNALS"],["attribution","ATTRIBUTION"],["analyzer","ANALYZER"]].map(([id,l])=>
+          {[["overview","OVERVIEW"],["framework","FRAMEWORK"],["themes","THEMES"],["news","NEWS"],["signals","SIGNALS"],["attribution","ATTRIBUTION"],["analyzer","ANALYZER"]].map(([id,l])=>
             <Tab key={id} id={id} label={l} />
           )}
         </nav>
@@ -1389,8 +1591,24 @@ export default function ThesisDashboard() {
           </div>
         )}
 
+        {/* ══ FRAMEWORK ══ */}
+        {tab === "framework" && (
+          <FrameworkTab
+            portfolio={portfolio}
+            signalData={signalData}
+            attrData={attrData}
+            avgSent={avgSent}
+            onAnalyze={(tk) => { setAnalyzerFocus(tk); setTab("analyzer"); }}
+          />
+        )}
+
         {/* ══ ANALYZER ══ */}
-        {tab === "analyzer" && <AnalyzerTab />}
+        {tab === "analyzer" && (
+          <AnalyzerTab
+            initialTicker={analyzerFocus}
+            onTickerApplied={() => setAnalyzerFocus("")}
+          />
+        )}
 
       </main>
       </div>
