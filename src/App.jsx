@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from "recharts";
-import { Panel, Btn, Input3D, StatTile, MetricChip, DEPTH_CSS, depthC as C, panelBase } from "./depthUI";
+import { Panel, Btn, Input3D, StatTile, MetricChip, SideNavItem, DEPTH_CSS, depthC as C, panelBase } from "./depthUI";
 
 const API =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) ||
@@ -410,6 +410,121 @@ function SignalsTab({ signalData, signals }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ── Smart Money / Flow tab — congress + SEC insiders ─────────────────────────
+function FlowTab({ flowData, flowLoading, flowStatus, onAnalyze, signalData }) {
+  const congress = flowData?.congress ?? {};
+  const trades = congress?.trades ?? [];
+  const insiders = flowData?.insiders ?? [];
+  const convergence = flowData?.convergence ?? [];
+  const stats = flowData?.stats ?? {};
+  const status = flowStatus ?? {};
+
+  const TxBadge = ({ tx }) => {
+    const buy = tx === "BUY" || tx === "Purchase" || (tx && String(tx).toLowerCase().includes("purchase"));
+    return (
+      <span style={{
+        fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3,
+        fontFamily: "'JetBrains Mono', monospace",
+        color: buy ? C.green : C.red,
+        background: buy ? `${C.green}18` : `${C.red}18`,
+      }}>{buy ? "BUY" : "SELL"}</span>
+    );
+  };
+
+  return (
+    <div style={{ animation: "fadeUp 0.35s ease" }}>
+      <div style={{ marginBottom: 20 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 6 }}>Smart money</h1>
+        <p style={{ fontSize: 13, color: C.muted, maxWidth: 640, lineHeight: 1.6 }}>
+          Congressional STOCK Act filings and SEC Form 4 insider disclosures on your thesis universe.
+          Public data only — delayed vs trade date. Not financial advice.
+        </p>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 16 }}>
+        <StatTile label="Congress trades" value={stats.congress_trades ?? "—"} sub={status.stonkwhisper ? "StonkWhisper" : "API key needed"} accent={C.accent} loading={flowLoading} />
+        <StatTile label="Form 4 filings" value={stats.insider_filings ?? "—"} sub="SEC EDGAR (free)" accent={C.green} loading={flowLoading} />
+        <StatTile label="Confluence" value={stats.convergence_hits ?? "—"} sub="overlap w/ signals" accent={C.yellow} loading={flowLoading} />
+        <StatTile label="Tracked reps" value={status.watched_politicians?.length ?? 8} sub="Pelosi + watchlist" loading={false} />
+      </div>
+
+      {!status.stonkwhisper && (
+        <Panel accent={C.yellow} style={{ padding: 14, marginBottom: 16 }}>
+          <Mono style={{ fontSize: 11, color: C.text, lineHeight: 1.6 }}>
+            Congress feed: add <b>STONKWHISPER_API_KEY</b> on Render (free at{" "}
+            <a href="https://stonkwhisper.com/signup" target="_blank" rel="noreferrer" style={{ color: C.accent }}>stonkwhisper.com/signup</a>
+            , 100 req/day). Insider Form 4 already works via SEC — no key.
+          </Mono>
+        </Panel>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 14, marginBottom: 14 }}>
+        <Panel style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between" }}>
+            <Mono style={{ fontSize: 12, fontWeight: 600 }}>Congressional trades</Mono>
+            <Mono style={{ fontSize: 9, color: C.dim }}>watched politicians</Mono>
+          </div>
+          {flowLoading ? <Mono style={{ padding: 16, color: C.dim }}>Loading…</Mono>
+            : trades.length ? trades.slice(0, 12).map((t, i) => (
+              <div key={i} onClick={() => t.ticker && onAnalyze(t.ticker)}
+                style={{ padding: "10px 16px", borderBottom: `1px solid ${C.border}`, cursor: t.ticker ? "pointer" : "default" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <Mono style={{ fontSize: 12, fontWeight: 600, color: C.accent }}>{t.ticker || "—"}</Mono>
+                  <TxBadge tx={t.transaction} />
+                </div>
+                <Mono style={{ fontSize: 10, color: C.muted, display: "block", marginTop: 4 }}>{t.politician}</Mono>
+                <Mono style={{ fontSize: 9, color: C.dim }}>{t.amount_range || "—"} · filed {t.filed || "—"}</Mono>
+              </div>
+            )) : <Mono style={{ padding: 16, color: C.dim }}>No congress trades yet.</Mono>}
+        </Panel>
+
+        <Panel style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}` }}>
+            <Mono style={{ fontSize: 12, fontWeight: 600 }}>SEC Form 4 — corporate insiders</Mono>
+          </div>
+          {flowLoading ? <Mono style={{ padding: 16, color: C.dim }}>Loading…</Mono>
+            : insiders.slice(0, 10).map((t, i) => (
+              <div key={i} onClick={() => onAnalyze(t.ticker)}
+                style={{ padding: "10px 16px", borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <Mono style={{ fontSize: 12, fontWeight: 600, color: C.accent }}>{t.ticker}</Mono>
+                  <Mono style={{ fontSize: 9, color: C.dim }}>{t.filed}</Mono>
+                </div>
+                <Mono style={{ fontSize: 10, color: C.muted }}>{t.insider}</Mono>
+                {t.sec_url && (
+                  <a href={t.sec_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                    style={{ fontSize: 9, color: C.accent, marginTop: 4, display: "inline-block" }}>SEC filing →</a>
+                )}
+              </div>
+            ))}
+        </Panel>
+      </div>
+
+      <Panel style={{ padding: 16 }}>
+        <Mono style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>Confluence — congress / Form 4 + ML signal</Mono>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
+          {convergence.slice(0, 16).map(row => {
+            const sig = signalData?.tickers?.[row.ticker];
+            return (
+              <div key={row.ticker} onClick={() => onAnalyze(row.ticker)}
+                style={{ padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}`, cursor: "pointer" }}>
+                <Mono style={{ fontSize: 13, fontWeight: 700, color: C.accent }}>{row.ticker}</Mono>
+                <Mono style={{ fontSize: 9, color: C.dim, display: "block", marginTop: 4 }}>
+                  {row.congress_buy ? "CONG " : ""}{row.insider_filing ? "SEC4 " : ""}{sig?.signal || row.signal}
+                </Mono>
+                <Mono style={{ fontSize: 11, color: C.green, marginTop: 4 }}>{(row.confluence_score * 100).toFixed(0)}%</Mono>
+              </div>
+            );
+          })}
+        </div>
+        {!convergence.length && !flowLoading && (
+          <Mono style={{ fontSize: 11, color: C.dim }}>No overlap yet — refresh after signals train.</Mono>
+        )}
+      </Panel>
     </div>
   );
 }
@@ -1015,6 +1130,8 @@ export default function ThesisDashboard() {
   const feed    = useApi("/api/news?limit=2000",     300_000);
   const attr    = useApi(`/api/attribution?period=${period}`, null);
   const signals = useApi("/api/signals",             3_600_000);
+  const flow      = useApi("/api/flow/universe",     3_600_000);
+  const flowStat  = useApi("/api/flow/status",       600_000);
 
   useEffect(() => { attr.refetch?.(); }, [period]);
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
@@ -1052,77 +1169,62 @@ export default function ThesisDashboard() {
 
   const handleRefresh = async () => {
     await fetch(`${API}/api/refresh`, { method:"POST" }).catch(()=>{});
-    setTimeout(() => { pf.refetch(); px.refetch(); feed.refetch(); }, 2000);
+    setTimeout(() => { pf.refetch(); px.refetch(); feed.refetch(); flow.refetch(); flowStat.refetch(); }, 2000);
   };
 
-  // Shared nav button
-  const Tab = ({ id, label }) => {
-    const active = tab === id;
-    return (
-      <button onClick={() => setTab(id)} style={{
-        padding:"8px 14px", border:"none", cursor:"pointer", fontSize:11,
-        fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.06em", fontWeight:600,
-        color: active ? C.accent : C.muted,
-        background: active ? C.surfaceHi : "transparent",
-        borderBottom: active ? `3px solid ${C.accent}` : "3px solid transparent",
-        boxShadow: active ? `inset 0 -8px 12px ${C.accent}18, 0 4px 0 #030303` : "none",
-        transform: active ? "translateY(-1px)" : "none",
-        transition:"all 0.15s ease",
-      }}>{label}</button>
-    );
-  };
+  const NAV = [
+    ["overview", "Overview", "Portfolio"],
+    ["flow", "Smart money", "Congress · SEC"],
+    ["framework", "Framework", "THESIS process"],
+    ["themes", "Themes", "Buckets"],
+    ["news", "News", "Sentiment"],
+    ["signals", "Signals", "ML"],
+    ["attribution", "Attribution", "Alpha"],
+    ["analyzer", "Analyzer", "Deep dive"],
+  ];
 
   return (
-    <div className="thesis-scene" style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'IBM Plex Sans',system-ui,sans-serif", fontSize:13, lineHeight:1.5 }}>
+    <div style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13, lineHeight:1.5, display:"flex" }}>
       <style>{DEPTH_CSS}</style>
-      <div className="thesis-main" style={{ minHeight:"100vh" }}>
 
-      {/* Offline banner */}
+      <aside style={{
+        width: 220, flexShrink: 0, background: C.surface,
+        borderRight: `1px solid ${C.border}`, padding: "16px 12px",
+        display: "flex", flexDirection: "column", minHeight: "100vh",
+        position: "sticky", top: 0, alignSelf: "flex-start",
+      }}>
+        <div style={{ padding: "4px 8px 20px", borderBottom: `1px solid ${C.border}`, marginBottom: 12 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.03em", color: C.text }}>Thesis</div>
+          <Mono style={{ fontSize: 9, color: C.dim, display: "block", marginTop: 4 }}>research dashboard</Mono>
+        </div>
+        <nav style={{ flex: 1 }}>
+          {NAV.map(([id, label, sub]) => (
+            <SideNavItem key={id} active={tab === id} label={label} sub={sub}
+              onClick={() => setTab(id)} />
+          ))}
+        </nav>
+        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
+          <Btn small ghost onClick={handleRefresh}>Refresh data</Btn>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: online === false ? C.red : C.green }} />
+            <Mono style={{ fontSize: 9, color: online === false ? C.red : C.green }}>
+              {online === false ? "Offline" : "Live"}
+            </Mono>
+            <Mono style={{ fontSize: 9, color: C.dim, marginLeft: "auto" }}>
+              {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </Mono>
+          </div>
+        </div>
+      </aside>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
       {online === false && (
-        <div style={{ background:"#1a1100", borderBottom:`1px solid #f0b42940`, padding:"7px 24px" }}>
-          <Mono style={{ fontSize:11, color:C.accent }}>
-            ⚠ Backend offline. Run: uvicorn main:app --port 8000
-          </Mono>
+        <div style={{ background: `${C.red}12`, borderBottom: `1px solid ${C.red}33`, padding: "8px 24px" }}>
+          <Mono style={{ fontSize: 11, color: C.red }}>Backend offline — start uvicorn on port 8000</Mono>
         </div>
       )}
 
-      {/* Header */}
-      <header style={{ ...panelBase({ borderRadius: 0, marginBottom: 0 }), padding:"0 24px",
-        display:"flex", alignItems:"stretch", justifyContent:"space-between", height:52,
-        borderBottom:`1px solid ${C.border}` }}>
-        <div style={{ display:"flex", alignItems:"center", gap:12, borderRight:`1px solid ${C.border}`, paddingRight:16, marginRight:4 }}>
-          <div style={{ width:28, height:28, background:C.accent, display:"flex", alignItems:"center",
-            justifyContent:"center", fontSize:12, fontWeight:900, color:C.bg, borderRadius:6,
-            fontFamily:"'IBM Plex Mono',monospace",
-            boxShadow:`0 3px 0 #030303, 0 6px 12px ${C.accent}44, inset 0 1px 0 rgba(255,255,255,0.25)` }}>T</div>
-          <Mono style={{ fontWeight:700, fontSize:14, letterSpacing:"0.08em" }}>THESIS</Mono>
-        </div>
-
-        {/* Nav tabs */}
-        <nav style={{ display:"flex", alignItems:"stretch", gap:0 }}>
-          {[["overview","OVERVIEW"],["framework","FRAMEWORK"],["themes","THEMES"],["news","NEWS"],["signals","SIGNALS"],["attribution","ATTRIBUTION"],["analyzer","ANALYZER"]].map(([id,l])=>
-            <Tab key={id} id={id} label={l} />
-          )}
-        </nav>
-
-        {/* Right controls */}
-        <div style={{ display:"flex", alignItems:"center", gap:12, marginLeft:"auto" }}>
-          <Btn small onClick={handleRefresh}>↻ REFRESH</Btn>
-          <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <div style={{ width:6, height:6, borderRadius:"50%",
-              background:online===false?C.red:C.green,
-              boxShadow:online===false?`0 0 4px ${C.red}`:`0 0 4px ${C.green}` }} />
-            <Mono style={{ fontSize:10, color:online===false?C.red:C.green }}>
-              {online===false?"OFFLINE":"LIVE"}
-            </Mono>
-          </div>
-          <Mono style={{ fontSize:10, color:C.dim }}>
-            {now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}
-          </Mono>
-        </div>
-      </header>
-
-      <main style={{ padding:"20px 24px", maxWidth:1440, margin:"0 auto" }}>
+      <main style={{ padding: "24px 28px", maxWidth: 1280 }}>
 
         {/* ══ OVERVIEW ══ */}
         {tab === "overview" && (<>
@@ -1589,6 +1691,16 @@ export default function ThesisDashboard() {
               ))}
             </div>
           </div>
+        )}
+
+        {tab === "flow" && (
+          <FlowTab
+            flowData={flow.data}
+            flowLoading={flow.loading}
+            flowStatus={flowStat.data}
+            signalData={signalData}
+            onAnalyze={(tk) => { setAnalyzerFocus(tk); setTab("analyzer"); }}
+          />
         )}
 
         {/* ══ FRAMEWORK ══ */}
