@@ -1,31 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from "recharts";
+import { Panel, Btn, Input3D, StatTile, DEPTH_CSS, depthC as C, panelBase } from "./depthUI";
 
 const API =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) ||
   (typeof process !== "undefined" && process.env?.REACT_APP_API_URL) ||
   "http://localhost:8000";
-
-// ── Design tokens ─────────────────────────────────────────────────────────────
-const C = {
-  bg:      "#0a0a0a",
-  surface: "#111111",
-  border:  "#1f1f1f",
-  border2: "#2a2a2a",
-  text:    "#e8e8e8",
-  muted:   "#666666",
-  dim:     "#333333",
-  accent:  "#f0b429",   // single amber accent
-  green:   "#22c55e",
-  red:     "#ef4444",
-  yellow:  "#f0b429",
-  // theme colors — flat, no gradients
-  ai:      "#60a5fa",
-  defense: "#f97316",
-  energy:  "#4ade80",
-  bio:     "#c084fc",
-  health:  "#f472b6",
-};
 
 const THEMES = {
   "AI Infrastructure":         { color: C.ai,      icon: "AI",   short: "AI"       },
@@ -539,7 +519,7 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
     });
   };
 
-  const panel = { background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, padding:16, marginBottom:12 };
+  const panel = { ...panelBase(), padding:16, marginBottom:12 };
   const row = { display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:`1px solid ${C.border}` };
   const DataRow = ({ label, value, color=C.text }) => (
     <div style={row}>
@@ -553,7 +533,7 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
 
   return (
     <div>
-      <div style={{ ...panel, marginBottom:16 }}>
+      <Panel style={{ marginBottom:16, padding:16 }}>
         <Label>Stock Lookup — Live Market Data</Label>
         <Mono style={{ fontSize:10, color:C.dim, display:"block", marginBottom:10 }}>
           Live fundamentals + technicals (Yahoo). Optional AI report uses your free Cohere key (same as news sentiment).
@@ -563,18 +543,10 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
           {API.includes("localhost") && " — wrong for production; set VITE_API_URL on Vercel"}
         </Mono>
         <div style={{ display:"flex", gap:8 }}>
-          <input value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())}
+          <Input3D value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())}
             onKeyDown={e=>e.key==="Enter"&&!loading&&analyze()}
-            placeholder="NVDA, AAPL, MSFT, LMT, SIGA, BRK-B…"
-            style={{ flex:1, padding:"7px 10px", background:C.bg, border:`1px solid ${C.border2}`,
-              borderRadius:3, color:C.text, fontSize:13, fontFamily:"'IBM Plex Mono',monospace", outline:"none" }}/>
-          <button onClick={analyze} disabled={loading||!ticker.trim()} style={{
-            padding:"7px 22px", borderRadius:3, border:`1px solid ${C.accent}`,
-            background:loading?C.border:C.accent+"18", color:C.accent, fontSize:11,
-            fontFamily:"'IBM Plex Mono',monospace", cursor:loading?"not-allowed":"pointer",
-            fontWeight:700, letterSpacing:"0.05em", minWidth:110 }}>
-            {loading ? "FETCHING…" : "LOOKUP →"}
-          </button>
+            placeholder="NVDA, AAPL, MSFT, LMT, SIGA, BRK-B…" />
+          <Btn onClick={analyze} disabled={loading||!ticker.trim()}>{loading ? "FETCHING…" : "LOOKUP →"}</Btn>
         </div>
         {error && <Mono style={{ fontSize:11, color:C.red, marginTop:8 }}>✗ {error}</Mono>}
         {q?.fundamentals_error && (
@@ -603,12 +575,10 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
             {agentPrompt(ticker.trim().toUpperCase() || "[TICKER]")}
           </pre>
         )}
-      </div>
+      </Panel>
 
-      {/* Quote strip */}
       {q && (
-        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4,
-          padding:"12px 16px", marginBottom:16,
+        <Panel style={{ padding:"12px 16px", marginBottom:16,
           display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))", gap:12 }}>
           {[
             { label:"PRICE",     value:`$${q.price?.toFixed(2)}`,
@@ -646,7 +616,7 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
               <Mono style={{ fontSize:14, fontWeight:700, color }}>{value}</Mono>
             </div>
           ))}
-        </div>
+        </Panel>
       )}
 
       {q && (
@@ -879,28 +849,26 @@ export default function ThesisDashboard() {
   };
 
   // Shared nav button
-  const Tab = ({ id, label }) => (
-    <button onClick={() => setTab(id)} style={{
-      padding:"5px 12px", border:"none", cursor:"pointer", fontSize:11,
-      fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.06em", fontWeight:600,
-      color: tab===id ? C.accent : C.muted,
-      background: "transparent",
-      borderBottom: tab===id ? `2px solid ${C.accent}` : "2px solid transparent",
-      transition:"all 0.1s",
-    }}>{label}</button>
-  );
+  const Tab = ({ id, label }) => {
+    const active = tab === id;
+    return (
+      <button onClick={() => setTab(id)} style={{
+        padding:"8px 14px", border:"none", cursor:"pointer", fontSize:11,
+        fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.06em", fontWeight:600,
+        color: active ? C.accent : C.muted,
+        background: active ? C.surfaceHi : "transparent",
+        borderBottom: active ? `3px solid ${C.accent}` : "3px solid transparent",
+        boxShadow: active ? `inset 0 -8px 12px ${C.accent}18, 0 4px 0 #030303` : "none",
+        transform: active ? "translateY(-1px)" : "none",
+        transition:"all 0.15s ease",
+      }}>{label}</button>
+    );
+  };
 
   return (
-    <div style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'IBM Plex Sans',system-ui,sans-serif", fontSize:13, lineHeight:1.5 }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0}
-        ::-webkit-scrollbar{width:4px;height:4px}
-        ::-webkit-scrollbar-track{background:${C.bg}}
-        ::-webkit-scrollbar-thumb{background:${C.border2};border-radius:2px}
-        button{font-family:inherit}
-        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
-      `}</style>
+    <div className="thesis-scene" style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'IBM Plex Sans',system-ui,sans-serif", fontSize:13, lineHeight:1.5 }}>
+      <style>{DEPTH_CSS}</style>
+      <div className="thesis-main" style={{ minHeight:"100vh" }}>
 
       {/* Offline banner */}
       {online === false && (
@@ -912,14 +880,15 @@ export default function ThesisDashboard() {
       )}
 
       {/* Header */}
-      <header style={{ background:C.surface, borderBottom:`1px solid ${C.border}`, padding:"0 24px",
-        display:"flex", alignItems:"stretch", justifyContent:"space-between", height:48 }}>
-        {/* Logo */}
+      <header style={{ ...panelBase({ borderRadius: 0, marginBottom: 0 }), padding:"0 24px",
+        display:"flex", alignItems:"stretch", justifyContent:"space-between", height:52,
+        borderBottom:`1px solid ${C.border}` }}>
         <div style={{ display:"flex", alignItems:"center", gap:12, borderRight:`1px solid ${C.border}`, paddingRight:16, marginRight:4 }}>
-          <div style={{ width:24, height:24, background:C.accent, display:"flex", alignItems:"center",
-            justifyContent:"center", fontSize:11, fontWeight:900, color:C.bg, borderRadius:2,
-            fontFamily:"'IBM Plex Mono',monospace" }}>T</div>
-          <Mono style={{ fontWeight:700, fontSize:13, letterSpacing:"0.05em" }}>THESIS</Mono>
+          <div style={{ width:28, height:28, background:C.accent, display:"flex", alignItems:"center",
+            justifyContent:"center", fontSize:12, fontWeight:900, color:C.bg, borderRadius:6,
+            fontFamily:"'IBM Plex Mono',monospace",
+            boxShadow:`0 3px 0 #030303, 0 6px 12px ${C.accent}44, inset 0 1px 0 rgba(255,255,255,0.25)` }}>T</div>
+          <Mono style={{ fontWeight:700, fontSize:14, letterSpacing:"0.08em" }}>THESIS</Mono>
         </div>
 
         {/* Nav tabs */}
@@ -931,9 +900,7 @@ export default function ThesisDashboard() {
 
         {/* Right controls */}
         <div style={{ display:"flex", alignItems:"center", gap:12, marginLeft:"auto" }}>
-          <button onClick={handleRefresh} style={{ background:"none", border:`1px solid ${C.border2}`,
-            borderRadius:2, padding:"4px 10px", color:C.muted, fontSize:10,
-            cursor:"pointer", fontFamily:"'IBM Plex Mono',monospace" }}>↻ REFRESH</button>
+          <Btn small onClick={handleRefresh}>↻ REFRESH</Btn>
           <div style={{ display:"flex", alignItems:"center", gap:6 }}>
             <div style={{ width:6, height:6, borderRadius:"50%",
               background:online===false?C.red:C.green,
@@ -953,9 +920,7 @@ export default function ThesisDashboard() {
         {/* ══ OVERVIEW ══ */}
         {tab === "overview" && (<>
 
-          {/* Stats strip */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:1, marginBottom:16,
-            border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:10, marginBottom:16 }}>
             {[
               { label:"PORTFOLIO", value:pf.loading?null:f$(totalVal),     sub:"3-year thesis",          accent:C.accent },
               { label:"RETURN",    value:pf.loading?null:fp(totalRet),      sub:"vs $15k cost basis",      accent:totalRet>=0?C.green:C.red },
@@ -964,14 +929,7 @@ export default function ThesisDashboard() {
               { label:"SENTIMENT", value:feed.loading?null:globalSent,      sub:"24h avg compound",        accent:C.muted },
               { label:"ARTICLES",  value:feed.loading?null:news.length,     sub:"in feed",            accent:C.muted },
             ].map(({ label, value, sub, accent }) => (
-              <div key={label} style={{ padding:"14px 16px", background:C.surface }}>
-                <Label>{label}</Label>
-                {value == null
-                  ? <Skel h={22} w="60%" />
-                  : <Mono style={{ fontSize:20, fontWeight:700, color:accent, display:"block" }}>{value}</Mono>
-                }
-                <div style={{ fontSize:10, color:C.dim, marginTop:3 }}>{sub}</div>
-              </div>
+              <StatTile key={label} label={label} value={value} sub={sub} accent={accent} loading={value == null} />
             ))}
           </div>
 
@@ -983,24 +941,22 @@ export default function ThesisDashboard() {
                 const col  = sig.signal==="BUY"?C.green:sig.signal==="TRIM"?C.red:C.yellow;
                 const prob = Math.round(sig.outperform_prob*100);
                 return (
-                  <div key={theme} onClick={() => setTab("signals")}
-                    style={{ padding:"10px 14px", background:C.surface, border:`1px solid ${C.border}`,
-                      borderRadius:4, borderTop:`2px solid ${col}`, cursor:"pointer" }}>
+                  <Panel key={theme} onClick={() => setTab("signals")} accent={col}
+                    style={{ padding:"10px 14px" }}>
                     <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
                       <Mono style={{ fontSize:10, color:cfg.color }}>{cfg.short}</Mono>
                       <SigBadge signal={sig.signal} />
                     </div>
                     <Mono style={{ fontSize:18, fontWeight:700, color:col }}>{prob}%</Mono>
                     <ProbBar prob={sig.outperform_prob} color={col} />
-                  </div>
+                  </Panel>
                 );
               })}
             </div>
           )}
 
-          {/* Chart + theme cards */}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 280px", gap:12, marginBottom:12 }}>
-            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, padding:"16px 16px 8px" }}>
+            <Panel style={{ padding:"16px 16px 8px" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
                 <div>
                   <div style={{ fontSize:12, fontWeight:600, marginBottom:2 }}>Performance by theme</div>
@@ -1024,12 +980,6 @@ export default function ThesisDashboard() {
               ) : (
                 <ResponsiveContainer width="100%" height={220}>
                   <AreaChart data={timeline} margin={{ top:0, right:0, left:-20, bottom:0 }}>
-                    <defs>{Object.entries(THEMES).map(([n,c])=>(
-                      <linearGradient key={n} id={`a${n.replace(/\W/g,"")}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%"   stopColor={c.color} stopOpacity={0.12}/>
-                        <stop offset="100%" stopColor={c.color} stopOpacity={0}/>
-                      </linearGradient>
-                    ))}</defs>
                     <CartesianGrid strokeDasharray="2 4" stroke={C.border} vertical={false}/>
                     <XAxis dataKey="date" tick={{ fill:C.dim, fontSize:9, fontFamily:"'IBM Plex Mono',monospace" }}
                       axisLine={false} tickLine={false} tickFormatter={d => {
@@ -1044,13 +994,13 @@ export default function ThesisDashboard() {
                       axisLine={false} tickLine={false} tickFormatter={v=>f$(v)}/>
                     <Tooltip content={<ChartTip/>}/>
                     {Object.entries(THEMES).map(([n,c])=>(
-                      <Area key={n} type="monotone" dataKey={n} stroke={c.color} strokeWidth={1.5}
-                        fill={`url(#a${n.replace(/\W/g,"")})`} dot={false} activeDot={{ r:3, fill:c.color }}/>
+                      <Area key={n} type="monotone" dataKey={n} stroke={c.color} strokeWidth={2}
+                        fill={c.color} fillOpacity={0.06} dot={false} activeDot={{ r:4, fill:c.color, strokeWidth:0 }}/>
                     ))}
                   </AreaChart>
                 </ResponsiveContainer>
               )}
-            </div>
+            </Panel>
 
             {/* Theme cards */}
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
@@ -1059,10 +1009,8 @@ export default function ThesisDashboard() {
                 const ret  = t?.return_pct ?? 0;
                 const tl   = timeline.map(row => ({ total: row[name] ?? 0 }));
                 return (
-                  <div key={name} onClick={() => { setThemeFilter(name); setTab("themes"); }}
-                    style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4,
-                      padding:"10px 12px", cursor:"pointer", flex:1,
-                      borderLeft:`3px solid ${cfg.color}` }}>
+                  <Panel key={name} onClick={() => { setThemeFilter(name); setTab("themes"); }}
+                    accent={cfg.color} style={{ padding:"10px 12px", flex:1 }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:4 }}>
                       <Mono style={{ fontSize:10, color:cfg.color }}>{cfg.short}</Mono>
                       {pf.loading
@@ -1077,14 +1025,13 @@ export default function ThesisDashboard() {
                     <div style={{ marginTop:6 }}>
                       <MiniChart data={tl} color={cfg.color} />
                     </div>
-                  </div>
+                  </Panel>
                 );
               })}
             </div>
           </div>
 
-          {/* Position monitor table */}
-          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
+          <Panel style={{ overflow:"hidden", padding:0 }}>
             <div style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between" }}>
               <div style={{ fontSize:12, fontWeight:600 }}>Positions</div>
               <Mono style={{ fontSize:10, color:C.dim }}>
@@ -1145,7 +1092,7 @@ export default function ThesisDashboard() {
                 )}
               </tbody>
             </table>
-          </div>
+          </Panel>
         </>)}
 
         {/* ══ THEMES ══ */}
@@ -1441,6 +1388,7 @@ export default function ThesisDashboard() {
         {tab === "analyzer" && <AnalyzerTab />}
 
       </main>
+      </div>
     </div>
   );
 }
