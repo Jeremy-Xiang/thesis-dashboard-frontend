@@ -632,7 +632,7 @@ export default function ThesisDashboard() {
               { label:"THEMES",    value:Object.keys(THEMES ?? {}).length,        sub:"investment buckets",      accent:C.muted },
               { label:"TICKERS",   value:px.loading?null:Object.keys(prices ?? {}).length||53, sub:"tracked positions", accent:C.muted },
               { label:"SENTIMENT", value:feed.loading?null:globalSent,      sub:"24h avg compound",        accent:C.muted },
-              { label:"ARTICLES",  value:feed.loading?null:news.length,     sub:"scored today",            accent:C.muted },
+              { label:"ARTICLES",  value:feed.loading?null:news.length,     sub:"in feed",            accent:C.muted },
             ].map(({ label, value, sub, accent }) => (
               <div key={label} style={{ padding:"14px 16px", background:C.surface }}>
                 <Label>{label}</Label>
