@@ -1,15 +1,15 @@
 import { useState } from "react";
 
 export const depthC = {
-  bg: "#070707",
-  surface: "#111111",
-  surfaceHi: "#181818",
-  border: "#1c1c1c",
-  border2: "#2a2a2a",
-  borderHi: "#333333",
-  text: "#ececec",
-  muted: "#7a7a7a",
-  dim: "#404040",
+  bg: "#050505",
+  surface: "#0f0f0f",
+  surfaceHi: "#161616",
+  border: "#222",
+  border2: "#2e2e2e",
+  borderHi: "#444",
+  text: "#f0f0f0",
+  muted: "#888",
+  dim: "#555",
   accent: "#f0b429",
   green: "#22c55e",
   red: "#ef4444",
@@ -24,36 +24,33 @@ export const depthC = {
 export const DEPTH_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
-  ::-webkit-scrollbar{width:6px;height:6px}
+  ::-webkit-scrollbar{width:8px}
   ::-webkit-scrollbar-track{background:${depthC.bg}}
-  ::-webkit-scrollbar-thumb{background:${depthC.borderHi};border-radius:3px}
+  ::-webkit-scrollbar-thumb{background:${depthC.borderHi};border-radius:4px}
   button{font-family:inherit}
-  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
-  @keyframes floatY{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
-  .thesis-scene{perspective:1400px;perspective-origin:50% 0%}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+  @keyframes glow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 20px ${depthC.accent}33}}
+  .thesis-scene{perspective:1600px;perspective-origin:50% -10%}
   .thesis-main{transform-style:preserve-3d}
 `;
+
+const SHADOW_REST = `0 6px 0 #020202, 0 14px 40px rgba(0,0,0,0.7), 0 2px 0 #333 inset, inset 0 1px 0 rgba(255,255,255,0.08)`;
+const SHADOW_HOVER = `0 10px 0 #020202, 0 28px 50px rgba(0,0,0,0.85), 0 2px 0 #444 inset, inset 0 1px 0 rgba(255,255,255,0.12)`;
 
 export function panelBase(extra = {}) {
   return {
     background: depthC.surface,
     border: `1px solid ${depthC.border}`,
     borderTop: `1px solid ${depthC.borderHi}`,
-    borderLeft: `1px solid #2e2e2e`,
-    borderRadius: 8,
-    boxShadow: `0 4px 0 #030303, 0 12px 32px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06)`,
+    borderLeft: `1px solid #3a3a3a`,
+    borderRadius: 10,
+    boxShadow: SHADOW_REST,
+    transform: "translateZ(0)",
     ...extra,
   };
 }
 
-export function panelHover() {
-  return {
-    transform: "translateY(-4px) translateZ(8px)",
-    boxShadow: `0 8px 0 #030303, 0 20px 40px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.08)`,
-  };
-}
-
-export function Panel({ children, onClick, style = {}, lift = true, accent }) {
+export function Panel({ children, onClick, style = {}, lift = true, accent, tilt = false }) {
   const [hov, setHov] = useState(false);
   return (
     <div
@@ -63,9 +60,12 @@ export function Panel({ children, onClick, style = {}, lift = true, accent }) {
       style={{
         ...panelBase(),
         cursor: onClick ? "pointer" : "default",
-        transition: "transform 0.18s ease, box-shadow 0.18s ease",
-        ...(hov ? panelHover() : {}),
-        ...(accent ? { borderTop: `2px solid ${accent}`, boxShadow: `0 4px 0 #030303, 0 12px 28px ${accent}22, inset 0 1px 0 rgba(255,255,255,0.06)` } : {}),
+        transition: "transform 0.2s cubic-bezier(.2,.8,.2,1), box-shadow 0.2s ease",
+        transform: hov
+          ? `translateY(-6px) translateZ(12px)${tilt ? " rotateX(2deg)" : ""}`
+          : `translateZ(0)${tilt ? " rotateX(1deg)" : ""}`,
+        boxShadow: hov ? SHADOW_HOVER : SHADOW_REST,
+        ...(accent ? { borderTop: `3px solid ${accent}`, outline: `1px solid ${accent}33` } : {}),
         ...style,
       }}
     >
@@ -88,23 +88,23 @@ export function Btn({ children, onClick, disabled, accent, small }) {
       onMouseDown={() => setPress(true)}
       onMouseUp={() => setPress(false)}
       style={{
-        padding: small ? "4px 12px" : "7px 20px",
-        borderRadius: 6,
+        padding: small ? "5px 14px" : "9px 22px",
+        borderRadius: 8,
         border: `1px solid ${col}`,
-        borderTop: `1px solid ${col}cc`,
-        background: disabled ? depthC.border : press ? `${col}30` : hov ? `${col}28` : `${col}14`,
+        borderTop: `2px solid ${col}dd`,
+        background: disabled ? depthC.border : press ? `${col}40` : hov ? `${col}30` : `${col}18`,
         color: col,
         fontSize: small ? 10 : 11,
         fontFamily: "'IBM Plex Mono',monospace",
         fontWeight: 700,
-        letterSpacing: "0.06em",
+        letterSpacing: "0.08em",
         cursor: disabled ? "not-allowed" : "pointer",
         boxShadow: press
-          ? `inset 0 3px 6px rgba(0,0,0,0.5)`
+          ? "inset 0 4px 8px rgba(0,0,0,0.6)"
           : hov
-            ? `0 4px 0 #030303, 0 8px 16px ${col}33`
-            : `0 3px 0 #030303, 0 6px 12px rgba(0,0,0,0.4)`,
-        transform: press ? "translateY(2px)" : hov ? "translateY(-1px)" : "none",
+            ? `0 6px 0 #020202, 0 12px 24px ${col}44`
+            : `0 4px 0 #020202, 0 8px 16px rgba(0,0,0,0.5)`,
+        transform: press ? "translateY(3px) scale(0.98)" : hov ? "translateY(-2px)" : "none",
         transition: "all 0.12s ease",
       }}
     >
@@ -125,18 +125,20 @@ export function Input3D({ value, onChange, onKeyDown, placeholder, style = {} })
       onBlur={() => setFocus(false)}
       style={{
         flex: 1,
-        padding: "8px 12px",
-        background: depthC.bg,
+        padding: "10px 14px",
+        background: "#080808",
         border: `1px solid ${focus ? depthC.accent : depthC.borderHi}`,
-        borderRadius: 6,
+        borderTop: focus ? `2px solid ${depthC.accent}` : `1px solid #3a3a3a`,
+        borderRadius: 8,
         color: depthC.text,
         fontSize: 13,
         fontFamily: "'IBM Plex Mono',monospace",
         outline: "none",
         boxShadow: focus
-          ? `inset 0 2px 6px rgba(0,0,0,0.5), 0 0 0 1px ${depthC.accent}44`
-          : `inset 0 2px 5px rgba(0,0,0,0.45)`,
-        transition: "border-color 0.15s, box-shadow 0.15s",
+          ? `inset 0 3px 8px rgba(0,0,0,0.6), 0 4px 0 #020202, 0 0 16px ${depthC.accent}33`
+          : `inset 0 3px 8px rgba(0,0,0,0.55), 0 3px 0 #020202`,
+        transform: focus ? "translateY(-1px)" : "none",
+        transition: "all 0.15s ease",
         ...style,
       }}
     />
@@ -145,18 +147,46 @@ export function Input3D({ value, onChange, onKeyDown, placeholder, style = {} })
 
 export function StatTile({ label, value, sub, accent, loading }) {
   return (
-    <Panel lift style={{ padding: "14px 16px" }}>
-      <div style={{ fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", color: depthC.muted, marginBottom: 4 }}>
+    <Panel lift tilt style={{ padding: "16px 18px" }}>
+      <div style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: depthC.muted, marginBottom: 6 }}>
         {label}
       </div>
       {loading || value == null ? (
-        <div style={{ height: 22, width: "60%", background: depthC.borderHi, borderRadius: 3, animation: "pulse 1.4s ease infinite" }} />
+        <div style={{ height: 26, width: "65%", background: depthC.borderHi, borderRadius: 4, animation: "pulse 1.4s ease infinite" }} />
       ) : (
-        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 20, fontWeight: 700, color: accent || depthC.text, display: "block" }}>
+        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 22, fontWeight: 700, color: accent || depthC.text, display: "block", textShadow: "0 2px 8px rgba(0,0,0,0.5)" }}>
           {value}
         </span>
       )}
-      {sub && <div style={{ fontSize: 10, color: depthC.dim, marginTop: 4 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 10, color: depthC.dim, marginTop: 6 }}>{sub}</div>}
     </Panel>
   );
 }
+
+export function MetricChip({ label, value, color }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        padding: "10px 12px",
+        borderRadius: 8,
+        background: hov ? depthC.surfaceHi : "#0a0a0a",
+        border: `1px solid ${hov ? depthC.borderHi : depthC.border}`,
+        boxShadow: hov ? "0 4px 0 #020202, inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 2px 6px rgba(0,0,0,0.4)",
+        transform: hov ? "translateY(-2px) scale(1.02)" : "none",
+        transition: "all 0.15s ease",
+      }}
+    >
+      <Mono style={{ fontSize: 9, color: depthC.muted, letterSpacing: "0.12em", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
+        {label}
+      </Mono>
+      <Mono style={{ fontSize: 15, fontWeight: 700, color: color || depthC.text }}>{value}</Mono>
+    </div>
+  );
+}
+
+const Mono = ({ children, style = {} }) => (
+  <span style={{ fontFamily: "'IBM Plex Mono',monospace", ...style }}>{children}</span>
+);

@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from "recharts";
-import { Panel, Btn, Input3D, StatTile, DEPTH_CSS, depthC as C, panelBase } from "./depthUI";
+import { Panel, Btn, Input3D, StatTile, MetricChip, DEPTH_CSS, depthC as C, panelBase } from "./depthUI";
 
 const API =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) ||
   (typeof process !== "undefined" && process.env?.REACT_APP_API_URL) ||
-  "http://localhost:8000";
+  (typeof import.meta !== "undefined" && import.meta.env?.PROD
+    ? "https://thesis-dashboard-api.onrender.com"
+    : "http://localhost:8000");
 
 const THEMES = {
   "AI Infrastructure":         { color: C.ai,      icon: "AI",   short: "AI"       },
@@ -431,12 +433,16 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
     if (!sym) return;
     setLoading(true); setError(null); setQuote(null); setReport(""); setReportError(null);
     try {
-      const r = await fetch(`${API}/api/analyze/${sym}`);
+      const r = await fetch(`${API}/api/analyze/${sym}?_=${Date.now()}`, { cache: "no-store" });
       if (!r.ok) {
         const e = await r.json().catch(() => ({}));
         throw new Error(e.detail || `Failed to fetch ${sym}`);
       }
-      setQuote(await r.json());
+      const data = await r.json();
+      setQuote(data);
+      if (!data.sector && !data.market_cap) {
+        setError("Fundamentals empty — add ALPHA_VANTAGE_API_KEY on Render, redeploy backend, hard-refresh.");
+      }
     } catch (e) {
       setError(e.message || "Fetch failed");
     } finally {
@@ -610,18 +616,14 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
             { label:"VOL TREND", value:q.volume_trend!=null?(q.volume_trend>=0?"+":"")+q.volume_trend+"%":"N/A",
               color: q.volume_trend>=10?C.green:q.volume_trend<=-10?C.red:C.text },
           ].map(({label,value,color=C.text})=>(
-            <div key={label}>
-              <Mono style={{ fontSize:9, color:C.muted, letterSpacing:"0.1em",
-                textTransform:"uppercase", display:"block", marginBottom:3 }}>{label}</Mono>
-              <Mono style={{ fontSize:14, fontWeight:700, color }}>{value}</Mono>
-            </div>
+            <MetricChip key={label} label={label} value={value} color={color} />
           ))}
         </Panel>
       )}
 
       {q && (
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:12 }}>
-          <div style={panel}>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:14 }}>
+          <Panel lift tilt style={{ padding:16 }}>
             <Label>Company</Label>
             <DataRow label="Name" value={q.long_name || q.symbol} color={C.accent}/>
             <DataRow label="Sector" value={q.sector || "N/A"}/>
@@ -630,9 +632,9 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
             <DataRow label="Employees" value={q.employees?.toLocaleString() || "N/A"}/>
             <DataRow label="Market Cap" value={fmt(q.market_cap,"$")}/>
             <DataRow label="Avg Volume" value={fmt(q.avg_volume,"","",0)}/>
-          </div>
+          </Panel>
 
-          <div style={panel}>
+          <Panel lift tilt style={{ padding:16 }}>
             <Label>Valuation</Label>
             <DataRow label="P/E (TTM)" value={num(q.pe_ttm,1)}/>
             <DataRow label="Forward P/E" value={num(q.forward_pe,1)}/>
@@ -641,9 +643,9 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
             <DataRow label="Price/Book" value={num(q.price_to_book,2)}/>
             <DataRow label="EV/EBITDA" value={num(q.ev_ebitda,2)}/>
             <DataRow label="EV/Revenue" value={num(q.ev_revenue,2)}/>
-          </div>
+          </Panel>
 
-          <div style={panel}>
+          <Panel lift tilt style={{ padding:16 }}>
             <Label>Financials</Label>
             <DataRow label="Revenue (TTM)" value={fmt(q.revenue,"$")}/>
             <DataRow label="Gross Margin" value={pct(q.gross_margins)}/>
@@ -654,9 +656,9 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
             <DataRow label="Free Cash Flow" value={fmt(q.free_cashflow,"$")}/>
             <DataRow label="Cash / Debt" value={`${fmt(q.total_cash,"$")} / ${fmt(q.total_debt,"$")}`}/>
             <DataRow label="ROE / ROA" value={`${pct(q.roe)} / ${pct(q.roa)}`}/>
-          </div>
+          </Panel>
 
-          <div style={panel}>
+          <Panel lift tilt accent={C.green} style={{ padding:16 }}>
             <Label>Technicals</Label>
             <DataRow label="RSI (14)" value={num(q.rsi_14,1)}
               color={q.rsi_14>70?C.red:q.rsi_14<30?C.green:C.text}/>
@@ -674,9 +676,9 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
             <DataRow label="ATR (14)" value={`$${num(q.atr_14)}`}/>
             <DataRow label="Volume Trend" value={q.volume_trend!=null?`${q.volume_trend>=0?"+":""}${q.volume_trend}%`:"N/A"}
               color={q.volume_trend>=10?C.green:q.volume_trend<=-10?C.red:C.text}/>
-          </div>
+          </Panel>
 
-          <div style={panel}>
+          <Panel lift tilt accent="#60a5fa" style={{ padding:16 }}>
             <Label>Analyst Consensus</Label>
             <DataRow label="Rating" value={(q.recommendation||"N/A").toUpperCase()}
               color={["buy","strong_buy"].includes(q.recommendation)?C.green:q.recommendation==="sell"?C.red:C.yellow}/>
@@ -687,21 +689,21 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
             <DataRow label="Hold" value={q.analyst_hold ?? 0}/>
             <DataRow label="Sell" value={q.analyst_sell ?? 0}/>
             <DataRow label="Strong Sell" value={q.analyst_strong_sell ?? 0}/>
-          </div>
+          </Panel>
 
-          <div style={panel}>
+          <Panel lift tilt style={{ padding:16 }}>
             <Label>Positioning</Label>
             <DataRow label="Beta" value={num(q.beta,2)}/>
             <DataRow label="Short % Float" value={pct(q.short_pct_float)}/>
             <DataRow label="Insider %" value={pct(q.insider_pct)}/>
             <DataRow label="Institutional %" value={pct(q.institution_pct)}/>
             <DataRow label="Dividend Yield" value={q.dividend_yield ? pct(q.dividend_yield) : "None"}/>
-          </div>
+          </Panel>
         </div>
       )}
 
       {q && (q.earnings_history?.length > 0) && (
-        <div style={{ ...panel, marginTop:12 }}>
+        <Panel lift style={{ marginTop:14, padding:16 }}>
           <Label>Earnings — Last 4 Quarters</Label>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8, marginTop:8,
             paddingBottom:6, borderBottom:`1px solid ${C.border2}` }}>
@@ -723,18 +725,18 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
               </div>
             );
           })}
-        </div>
+        </Panel>
       )}
 
       {q?.description && (
-        <div style={{ ...panel, marginTop:12 }}>
+        <Panel lift style={{ marginTop:14, padding:16 }}>
           <Label>Business Summary</Label>
           <div style={{ fontSize:12, color:C.muted, lineHeight:1.65, marginTop:8 }}>{q.description}</div>
-        </div>
+        </Panel>
       )}
 
       {q && (
-        <div style={{ ...panel, marginTop:12, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+        <Panel style={{ marginTop:14, padding:14, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
           {aiStatus.any ? (
             <button type="button" onClick={generateReport} disabled={reportLoading} style={{
               padding:"7px 18px", borderRadius:3, border:`1px solid #60a5fa`,
@@ -751,7 +753,10 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
             <Mono style={{ fontSize:9, color:C.green }}>FREE · COHERE</Mono>
           )}
           {reportError && <Mono style={{ fontSize:10, color:C.red }}>✗ {reportError}</Mono>}
-        </div>
+          {q.fundamentals_source && (
+            <Mono style={{ fontSize:9, color:C.dim }}>data: {q.fundamentals_source}</Mono>
+          )}
+        </Panel>
       )}
 
       {report && (
