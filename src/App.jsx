@@ -404,16 +404,23 @@ function SignalsTab({ signalData, signals }) {
   );
 }
 
-// ── Analyzer tab — Institutional Stock Report ─────────────────────────────────
-function AnalyzerTab({ news }) {
-  const [ticker,  setTicker]  = useState("");
+// ── Analyzer tab — live market data (no in-app AI) ─────────────────────────────
+function AnalyzerTab() {
+  const [ticker, setTicker] = useState("");
   const [loading, setLoading] = useState(false);
-  const [report,  setReport]  = useState("");
-  const [quote,   setQuote]   = useState(null);
-  const [error,   setError]   = useState(null);
-  const [phase,   setPhase]   = useState("idle");
-  const reportRef = useRef(null);
+  const [quote, setQuote] = useState(null);
+  const [error, setError] = useState(null);
+  const [report, setReport] = useState("");
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState(null);
+  const [aiStatus, setAiStatus] = useState({ cohere: false, anthropic: false, any: false });
   const [showAgentPrompt, setShowAgentPrompt] = useState(false);
+  const reportRef = useRef(null);
+
+  useEffect(() => {
+    fetch(`${API}/api/analyze/ai-status`).then(r => r.ok ? r.json() : null)
+      .then(s => s && setAiStatus(s)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (reportRef.current) reportRef.current.scrollTop = reportRef.current.scrollHeight;
@@ -428,48 +435,47 @@ function AnalyzerTab({ news }) {
   };
 
   const pct = v => v == null ? "N/A" : `${(v*100).toFixed(1)}%`;
+  const num = (v, d=2) => v == null ? "N/A" : Number(v).toFixed(d);
+  const priceTag = (price, sma) => {
+    if (price == null || sma == null) return null;
+    const above = price > sma;
+    return { text: above ? "above" : "below", color: above ? C.green : C.red };
+  };
 
-  const agentPrompt = (sym) => `📈 Analyze the stock ticker: ${sym}
+  const agentPrompt = (sym) => `📈 Analyze ${sym} using live data: ${API}/api/analyze/${sym}
 
-Give me a complete institutional-style breakdown using live market data from the THESIS backend (${API}/api/analyze/${sym}).
-
-Include:
-1️⃣ Company Snapshot — name, market cap, sector, price, 52w range, volume
-2️⃣ Valuation Analysis — P/E vs sector, forward P/E, PEG, P/S, EV/EBITDA, fair value call
-3️⃣ Earnings Breakdown — last 4 quarters, EPS vs estimates, trends
-4️⃣ Technical Analysis — trend, RSI, MACD, support/resistance, SMA 20/50/200, volume, momentum
-5️⃣ Options Flow + Sentiment — unusual activity, put/call, IV, analyst actions (note: use backend data; options flow may be inferred)
-6️⃣ Risk Assessment — top 3-5 risks
-7️⃣ Bull vs Bear Case
-8️⃣ Competitive Positioning — vs top competitors
-9️⃣ Final Verdict — overall, short-term, long-term, key levels, catalyst
-🔟 Bonus — insider activity, macro risks, probability scenarios
-
-Format like a professional hedge fund analyst report with tables.`;
+Write an institutional report (valuation, earnings, technicals, risks, bull/bear, verdict).`;
 
   const analyze = async () => {
     const sym = ticker.trim().toUpperCase();
     if (!sym) return;
-    setLoading(true); setReport(""); setError(null); setQuote(null); setPhase("fetching");
+    setLoading(true); setError(null); setQuote(null); setReport(""); setReportError(null);
     try {
       const r = await fetch(`${API}/api/analyze/${sym}`);
       if (!r.ok) {
         const e = await r.json().catch(() => ({}));
         throw new Error(e.detail || `Failed to fetch ${sym}`);
       }
-      const data = await r.json();
-      setQuote(data);
-      setPhase("analyzing");
+      setQuote(await r.json());
+    } catch (e) {
+      setError(e.message || "Fetch failed");
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  const generateReport = async () => {
+    const sym = ticker.trim().toUpperCase();
+    if (!sym || !quote) return;
+    setReportLoading(true); setReport(""); setReportError(null);
+    try {
       const resp = await fetch(`${API}/api/analyze/${sym}/report`);
       if (!resp.ok) {
         const e = await resp.json().catch(() => ({}));
-        throw new Error(e.detail || "Report generation failed");
+        throw new Error(e.detail || "Report failed");
       }
-
       const reader = resp.body?.getReader();
       if (!reader) throw new Error("Streaming not supported");
-
       const decoder = new TextDecoder();
       let buf = "";
       while (true) {
@@ -490,16 +496,13 @@ Format like a professional hedge fund analyst report with tables.`;
           }
         }
       }
-      setPhase("done");
     } catch (e) {
-      setError(e.message || "Analysis failed");
-      setPhase("idle");
+      setReportError(e.message || "Report failed");
     } finally {
-      setLoading(false);
+      setReportLoading(false);
     }
   };
 
-  // Markdown renderer
   const renderMd = (text) => {
     if (!text) return null;
     return text.split("\n").map((line, i) => {
@@ -518,9 +521,7 @@ Format like a professional hedge fund analyst report with tables.`;
       );
       if (line.startsWith("| ") && line.includes("|")) return (
         <div key={i} style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:10,
-          color:C.muted, borderBottom:`1px solid ${C.border}`, padding:"4px 0" }}>
-          {line}
-        </div>
+          color:C.muted, borderBottom:`1px solid ${C.border}`, padding:"4px 0" }}>{line}</div>
       );
       if (line.startsWith("- ") || line.startsWith("• ")) return (
         <div key={i} style={{ display:"flex", gap:8, marginBottom:3 }}>
@@ -528,11 +529,6 @@ Format like a professional hedge fund analyst report with tables.`;
           <span style={{ fontSize:12, color:C.text, lineHeight:1.6 }}>
             {line.replace(/^[-•] /,"").replace(/\*\*(.*?)\*\*/g,"$1")}
           </span>
-        </div>
-      );
-      if (line.startsWith("**") && line.endsWith("**")) return (
-        <div key={i} style={{ fontSize:12, fontWeight:700, color:C.text, marginTop:8, marginBottom:2 }}>
-          {line.replace(/\*\*/g,"")}
         </div>
       );
       if (!line.trim()) return <div key={i} style={{ height:6 }}/>;
@@ -543,15 +539,25 @@ Format like a professional hedge fund analyst report with tables.`;
     });
   };
 
+  const panel = { background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, padding:16, marginBottom:12 };
+  const row = { display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:`1px solid ${C.border}` };
+  const DataRow = ({ label, value, color=C.text }) => (
+    <div style={row}>
+      <Mono style={{ fontSize:10, color:C.muted }}>{label}</Mono>
+      <Mono style={{ fontSize:11, fontWeight:600, color }}>{value}</Mono>
+    </div>
+  );
+
   const q = quote;
-  const pctChange = q?.price && q?.prev_close
-    ? ((q.price/q.prev_close-1)*100) : null;
+  const pctChange = q?.price && q?.prev_close ? ((q.price/q.prev_close-1)*100) : null;
 
   return (
     <div>
-      {/* Input */}
-      <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, padding:16, marginBottom:16 }}>
-        <Label>Institutional Stock Analysis</Label>
+      <div style={{ ...panel, marginBottom:16 }}>
+        <Label>Stock Lookup — Live Market Data</Label>
+        <Mono style={{ fontSize:10, color:C.dim, display:"block", marginBottom:10 }}>
+          Live fundamentals + technicals (Yahoo). Optional AI report uses your free Cohere key (same as news sentiment).
+        </Mono>
         <div style={{ display:"flex", gap:8 }}>
           <input value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())}
             onKeyDown={e=>e.key==="Enter"&&!loading&&analyze()}
@@ -563,7 +569,7 @@ Format like a professional hedge fund analyst report with tables.`;
             background:loading?C.border:C.accent+"18", color:C.accent, fontSize:11,
             fontFamily:"'IBM Plex Mono',monospace", cursor:loading?"not-allowed":"pointer",
             fontWeight:700, letterSpacing:"0.05em", minWidth:110 }}>
-            {loading ? (phase==="fetching"?"FETCHING…":"ANALYZING…") : "ANALYZE →"}
+            {loading ? "FETCHING…" : "LOOKUP →"}
           </button>
         </div>
         {error && <Mono style={{ fontSize:11, color:C.red, marginTop:8 }}>✗ {error}</Mono>}
@@ -572,21 +578,19 @@ Format like a professional hedge fund analyst report with tables.`;
             background:"transparent", border:`1px solid ${C.border2}`, borderRadius:2,
             padding:"3px 10px", color:C.muted, fontSize:10, cursor:"pointer",
             fontFamily:"'IBM Plex Mono',monospace" }}>
-            {showAgentPrompt ? "HIDE AGENT PROMPT" : "AGENT PROMPT →"}
+            {showAgentPrompt ? "HIDE CURSOR PROMPT" : "CURSOR PROMPT →"}
           </button>
           {ticker.trim() && (
             <button type="button" onClick={() => navigator.clipboard?.writeText(agentPrompt(ticker.trim().toUpperCase()))}
               style={{ background:"transparent", border:`1px solid ${C.border2}`, borderRadius:2,
                 padding:"3px 10px", color:C.accent, fontSize:10, cursor:"pointer",
-                fontFamily:"'IBM Plex Mono',monospace" }}>
-              COPY PROMPT
-            </button>
+                fontFamily:"'IBM Plex Mono',monospace" }}>COPY PROMPT</button>
           )}
         </div>
         {showAgentPrompt && (
           <pre style={{ marginTop:10, padding:12, background:C.bg, border:`1px solid ${C.border}`,
             borderRadius:3, fontSize:10, color:C.muted, whiteSpace:"pre-wrap", lineHeight:1.5,
-            fontFamily:"'IBM Plex Mono',monospace", maxHeight:200, overflowY:"auto" }}>
+            fontFamily:"'IBM Plex Mono',monospace", maxHeight:120, overflowY:"auto" }}>
             {agentPrompt(ticker.trim().toUpperCase() || "[TICKER]")}
           </pre>
         )}
@@ -636,39 +640,166 @@ Format like a professional hedge fund analyst report with tables.`;
         </div>
       )}
 
-      {/* Report */}
-      {report && (
-        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
-          <div style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}`,
-            display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <Mono style={{ fontSize:13, fontWeight:700, color:C.accent }}>{ticker}</Mono>
-            <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-              <span style={{ fontSize:9, padding:"2px 7px", borderRadius:2,
-                background:C.green+"18", color:C.green, border:`1px solid ${C.green}30`,
-                fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.05em", fontWeight:600 }}>LIVE DATA</span>
-              <span style={{ fontSize:9, padding:"2px 7px", borderRadius:2,
-                background:"#60a5fa18", color:"#60a5fa", border:"1px solid #60a5fa30",
-                fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.05em", fontWeight:600 }}>AI ANALYSIS</span>
-              <Mono style={{ fontSize:10, color:C.dim }}>
-                {new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}
-              </Mono>
-            </div>
+      {q && (
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:12 }}>
+          <div style={panel}>
+            <Label>Company</Label>
+            <DataRow label="Name" value={q.long_name || q.symbol} color={C.accent}/>
+            <DataRow label="Sector" value={q.sector || "N/A"}/>
+            <DataRow label="Industry" value={q.industry || "N/A"}/>
+            <DataRow label="Exchange" value={q.exchange || "N/A"}/>
+            <DataRow label="Employees" value={q.employees?.toLocaleString() || "N/A"}/>
+            <DataRow label="Market Cap" value={fmt(q.market_cap,"$")}/>
+            <DataRow label="Avg Volume" value={fmt(q.avg_volume,"","",0)}/>
           </div>
-          <div ref={reportRef} style={{ padding:"16px 20px", maxHeight:600,
-            overflowY:"auto", lineHeight:1.6 }}>
-            {renderMd(report)}
-            {loading && <span style={{ display:"inline-block", width:2, height:14,
-              background:C.accent, marginLeft:2, animation:"blink 1s step-end infinite",
-              verticalAlign:"text-bottom" }}/>}
+
+          <div style={panel}>
+            <Label>Valuation</Label>
+            <DataRow label="P/E (TTM)" value={num(q.pe_ttm,1)}/>
+            <DataRow label="Forward P/E" value={num(q.forward_pe,1)}/>
+            <DataRow label="PEG" value={num(q.peg_ratio,2)}/>
+            <DataRow label="Price/Sales" value={num(q.price_to_sales,2)}/>
+            <DataRow label="Price/Book" value={num(q.price_to_book,2)}/>
+            <DataRow label="EV/EBITDA" value={num(q.ev_ebitda,2)}/>
+            <DataRow label="EV/Revenue" value={num(q.ev_revenue,2)}/>
+          </div>
+
+          <div style={panel}>
+            <Label>Financials</Label>
+            <DataRow label="Revenue (TTM)" value={fmt(q.revenue,"$")}/>
+            <DataRow label="Gross Margin" value={pct(q.gross_margins)}/>
+            <DataRow label="Operating Margin" value={pct(q.operating_margins)}/>
+            <DataRow label="Profit Margin" value={pct(q.profit_margins)}/>
+            <DataRow label="Revenue Growth" value={pct(q.revenue_growth)}/>
+            <DataRow label="Earnings Growth" value={pct(q.earnings_growth)}/>
+            <DataRow label="Free Cash Flow" value={fmt(q.free_cashflow,"$")}/>
+            <DataRow label="Cash / Debt" value={`${fmt(q.total_cash,"$")} / ${fmt(q.total_debt,"$")}`}/>
+            <DataRow label="ROE / ROA" value={`${pct(q.roe)} / ${pct(q.roa)}`}/>
+          </div>
+
+          <div style={panel}>
+            <Label>Technicals</Label>
+            <DataRow label="RSI (14)" value={num(q.rsi_14,1)}
+              color={q.rsi_14>70?C.red:q.rsi_14<30?C.green:C.text}/>
+            <DataRow label="MACD" value={num(q.macd,4)}/>
+            <DataRow label="MACD Signal" value={num(q.macd_signal,4)}/>
+            <DataRow label="MACD Hist" value={num(q.macd_hist,4)}
+              color={q.macd_hist>=0?C.green:C.red}/>
+            <DataRow label="SMA 20" value={`$${num(q.sma_20)}`}
+              color={priceTag(q.price,q.sma_20)?.color}/>
+            <DataRow label="SMA 50" value={`$${num(q.sma_50)}`}
+              color={priceTag(q.price,q.sma_50)?.color}/>
+            <DataRow label="SMA 200" value={`$${num(q.sma_200)}`}
+              color={priceTag(q.price,q.sma_200)?.color}/>
+            <DataRow label="Bollinger" value={`${num(q.bb_lower)} – ${num(q.bb_upper)}`}/>
+            <DataRow label="ATR (14)" value={`$${num(q.atr_14)}`}/>
+            <DataRow label="Volume Trend" value={q.volume_trend!=null?`${q.volume_trend>=0?"+":""}${q.volume_trend}%`:"N/A"}
+              color={q.volume_trend>=10?C.green:q.volume_trend<=-10?C.red:C.text}/>
+          </div>
+
+          <div style={panel}>
+            <Label>Analyst Consensus</Label>
+            <DataRow label="Rating" value={(q.recommendation||"N/A").toUpperCase()}
+              color={["buy","strong_buy"].includes(q.recommendation)?C.green:q.recommendation==="sell"?C.red:C.yellow}/>
+            <DataRow label="Target Mean" value={`$${num(q.target_mean)}`} color="#60a5fa"/>
+            <DataRow label="Target High / Low" value={`$${num(q.target_high)} / $${num(q.target_low)}`}/>
+            <DataRow label="Strong Buy" value={q.analyst_strong_buy ?? 0}/>
+            <DataRow label="Buy" value={q.analyst_buy ?? 0}/>
+            <DataRow label="Hold" value={q.analyst_hold ?? 0}/>
+            <DataRow label="Sell" value={q.analyst_sell ?? 0}/>
+            <DataRow label="Strong Sell" value={q.analyst_strong_sell ?? 0}/>
+          </div>
+
+          <div style={panel}>
+            <Label>Positioning</Label>
+            <DataRow label="Beta" value={num(q.beta,2)}/>
+            <DataRow label="Short % Float" value={pct(q.short_pct_float)}/>
+            <DataRow label="Insider %" value={pct(q.insider_pct)}/>
+            <DataRow label="Institutional %" value={pct(q.institution_pct)}/>
+            <DataRow label="Dividend Yield" value={q.dividend_yield ? pct(q.dividend_yield) : "None"}/>
           </div>
         </div>
       )}
 
-      {!loading && !report && !error && (
+      {q && (q.earnings_history?.length > 0) && (
+        <div style={{ ...panel, marginTop:12 }}>
+          <Label>Earnings — Last 4 Quarters</Label>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8, marginTop:8,
+            paddingBottom:6, borderBottom:`1px solid ${C.border2}` }}>
+            {["Quarter","EPS Actual","EPS Est","Surprise"].map(h=>(
+              <Mono key={h} style={{ fontSize:9, color:C.muted, letterSpacing:"0.08em" }}>{h}</Mono>
+            ))}
+          </div>
+          {(q.earnings_history||[]).map((e,i)=>{
+            const surprise = e.actual!=null && e.estimate
+              ? ((e.actual-e.estimate)/Math.abs(e.estimate)*100).toFixed(1)+"%" : "N/A";
+            const beat = e.actual!=null && e.estimate && e.actual >= e.estimate;
+            return (
+              <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8, padding:"6px 0",
+                borderBottom:`1px solid ${C.border}` }}>
+                <Mono style={{ fontSize:11, color:C.text }}>{e.date}</Mono>
+                <Mono style={{ fontSize:11 }}>${num(e.actual)}</Mono>
+                <Mono style={{ fontSize:11, color:C.muted }}>${num(e.estimate)}</Mono>
+                <Mono style={{ fontSize:11, color:beat?C.green:C.red }}>{surprise}</Mono>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {q?.description && (
+        <div style={{ ...panel, marginTop:12 }}>
+          <Label>Business Summary</Label>
+          <div style={{ fontSize:12, color:C.muted, lineHeight:1.65, marginTop:8 }}>{q.description}</div>
+        </div>
+      )}
+
+      {q && (
+        <div style={{ ...panel, marginTop:12, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+          {aiStatus.any ? (
+            <button type="button" onClick={generateReport} disabled={reportLoading} style={{
+              padding:"7px 18px", borderRadius:3, border:`1px solid #60a5fa`,
+              background:reportLoading?"#60a5fa10":"#60a5fa18", color:"#60a5fa", fontSize:11,
+              fontFamily:"'IBM Plex Mono',monospace", cursor:reportLoading?"wait":"pointer", fontWeight:700 }}>
+              {reportLoading ? "WRITING REPORT…" : "AI REPORT →"}
+            </button>
+          ) : (
+            <Mono style={{ fontSize:10, color:C.muted }}>
+              No AI key on server — add COHERE_API_KEY on Render (free) or use Cursor prompt below
+            </Mono>
+          )}
+          {aiStatus.cohere && (
+            <Mono style={{ fontSize:9, color:C.green }}>FREE · COHERE</Mono>
+          )}
+          {reportError && <Mono style={{ fontSize:10, color:C.red }}>✗ {reportError}</Mono>}
+        </div>
+      )}
+
+      {report && (
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4,
+          overflow:"hidden", marginTop:12 }}>
+          <div style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}`,
+            display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <Mono style={{ fontSize:13, fontWeight:700, color:C.accent }}>{ticker} — Analyst Report</Mono>
+            <span style={{ fontSize:9, padding:"2px 7px", borderRadius:2,
+              background:aiStatus.cohere?"#22c55e18":"#60a5fa18",
+              color:aiStatus.cohere?C.green:"#60a5fa",
+              border:`1px solid ${aiStatus.cohere?C.green:"#60a5fa"}30`,
+              fontFamily:"'IBM Plex Mono',monospace", fontWeight:600 }}>
+              {aiStatus.cohere ? "COHERE FREE" : "ANTHROPIC"}
+            </span>
+          </div>
+          <div ref={reportRef} style={{ padding:"16px 20px", maxHeight:500, overflowY:"auto" }}>
+            {renderMd(report)}
+          </div>
+        </div>
+      )}
+
+      {!loading && !q && !error && (
         <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4,
           padding:48, textAlign:"center" }}>
           <Mono style={{ fontSize:11, color:C.muted, display:"block", marginBottom:16 }}>
-            Enter any ticker for a full institutional report — live data + AI analysis
+            Enter any ticker for live fundamentals, technicals, and earnings
           </Mono>
           <div style={{ display:"flex", gap:8, justifyContent:"center", flexWrap:"wrap" }}>
             {["NVDA","AAPL","MSFT","TSLA","GOOGL","SIGA","LMT","CEG","PWR","RTX"].map(t=>(
@@ -680,8 +811,6 @@ Format like a professional hedge fund analyst report with tables.`;
           </div>
         </div>
       )}
-
-      <style>{`@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}`}</style>
     </div>
   );
 }
@@ -1300,7 +1429,7 @@ export default function ThesisDashboard() {
         )}
 
         {/* ══ ANALYZER ══ */}
-        {tab === "analyzer" && <AnalyzerTab news={news} />}
+        {tab === "analyzer" && <AnalyzerTab />}
 
       </main>
     </div>
