@@ -48,6 +48,8 @@ const suggestPositionSize = (tk) => {
 const PERIODS = ["1m","3m","6m","1y","3y"];
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
+const FETCH_TIMEOUT_MS = 90_000;
+
 function useApi(path, pollMs = null) {
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
@@ -55,14 +57,26 @@ function useApi(path, pollMs = null) {
   const [updated, setUpdated] = useState(null);
 
   const run = useCallback(async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
     try {
-      const r = await fetch(`${API}${path}`);
-      if (!r.ok) throw new Error(`${r.status}`);
+      const r = await fetch(`${API}${path}`, { signal: ctrl.signal, cache: "no-store" });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.detail || `HTTP ${r.status}`);
+      }
       setData(await r.json());
       setError(null);
       setUpdated(new Date());
-    } catch(e) { setError(e.message); }
-    finally { setLoading(false); }
+    } catch (e) {
+      const msg = e.name === "AbortError"
+        ? "Request timed out — backend may be waking up; try Refresh"
+        : (e.message || "fetch failed");
+      setError(msg);
+    } finally {
+      clearTimeout(timer);
+      setLoading(false);
+    }
   }, [path]);
 
   useEffect(() => {
@@ -114,6 +128,23 @@ const Label = ({ children }) => (
 );
 
 const Divider = () => <div style={{ height:1, background:C.border, margin:"0" }} />;
+
+const ApiBanner = ({ items }) => {
+  const bad = items.filter(x => x.error);
+  if (!bad.length) return null;
+  return (
+    <Panel accent={C.red} style={{ padding: 12, marginBottom: 14 }}>
+      {bad.map(({ label, error }) => (
+        <Mono key={label} style={{ fontSize: 11, color: C.red, display: "block", marginBottom: 4 }}>
+          {label}: {error}
+          {error.includes("fetch") || error.includes("Failed") || error.includes("HTTP")
+            ? " — check Render ALLOWED_ORIGINS includes your exact Vercel URL (no trailing slash)" : ""}
+        </Mono>
+      ))}
+      <Mono style={{ fontSize: 10, color: C.dim }}>API: {API}</Mono>
+    </Panel>
+  );
+};
 
 const SigBadge = ({ signal }) => {
   const col = signal === "BUY" ? C.green : signal === "TRIM" ? C.red : C.yellow;
@@ -192,7 +223,7 @@ const SentBar = ({ score=0.5 }) => {
 };
 
 // ── Signals tab ───────────────────────────────────────────────────────────────
-function SignalsTab({ signalData, signals }) {
+function SignalsTab({ signalData, signals, signalsError, signalsFallback }) {
   const [customTicker,  setCustomTicker]  = useState("");
   const [lookupResult,  setLookupResult]  = useState(null);
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -227,11 +258,24 @@ function SignalsTab({ signalData, signals }) {
 
   return (
     <div>
+      {signalsError && (
+        <Panel accent={C.red} style={{ padding: 12, marginBottom: 14 }}>
+          <Mono style={{ fontSize: 11, color: C.red }}>Signals: {signalsError}</Mono>
+        </Panel>
+      )}
+      {signalsFallback && (
+        <Panel accent={C.yellow} style={{ padding: 12, marginBottom: 14 }}>
+          <Mono style={{ fontSize: 11, color: C.muted }}>
+            ML model still training — showing momentum fallback. Click Refresh data in the sidebar.
+          </Mono>
+        </Panel>
+      )}
+
       {/* Header row */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:20 }}>
         <div style={{ fontSize:13, fontWeight:600 }}>Prediction Signals</div>
         <Mono style={{ fontSize:11, color:C.muted }}>
-          Random Forest · 3y training · 30-day outperformance vs SPY
+          Random Forest · 30-day outperformance vs SPY
           {signals.data?.trained_at && ` · trained ${new Date(signals.data.trained_at).toLocaleDateString()}`}
         </Mono>
       </div>
@@ -379,6 +423,12 @@ function SignalsTab({ signalData, signals }) {
         </Mono>
       </div>
 
+      {!sorted.length && !signals.loading && (
+        <Mono style={{ fontSize: 12, color: C.dim, padding: 24, textAlign: "center", display: "block" }}>
+          No ticker signals yet — wait for backend training or click Refresh data.
+        </Mono>
+      )}
+
       {/* Ticker grid */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:8 }}>
         {sorted.map(([ticker, sig]) => {
@@ -415,7 +465,7 @@ function SignalsTab({ signalData, signals }) {
 }
 
 // ── Smart Money / Flow tab — congress + SEC insiders ─────────────────────────
-function FlowTab({ flowData, flowLoading, flowStatus, onAnalyze, signalData }) {
+function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, signalData }) {
   const congress = flowData?.congress ?? {};
   const trades = congress?.trades ?? [];
   const insiders = flowData?.insiders ?? [];
@@ -441,7 +491,7 @@ function FlowTab({ flowData, flowLoading, flowStatus, onAnalyze, signalData }) {
         <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 6 }}>Smart money</h1>
         <p style={{ fontSize: 13, color: C.muted, maxWidth: 640, lineHeight: 1.6 }}>
           Congressional STOCK Act filings and SEC Form 4 insider disclosures on your thesis universe.
-          Public data only — delayed vs trade date. Not financial advice.
+          Public data only — delayed vs trade date.
         </p>
       </div>
 
@@ -452,7 +502,12 @@ function FlowTab({ flowData, flowLoading, flowStatus, onAnalyze, signalData }) {
         <StatTile label="Tracked reps" value={status.watched_politicians?.length ?? 8} sub="Pelosi + watchlist" loading={false} />
       </div>
 
-      {congress?.message && (
+      {flowError && (
+        <Panel accent={C.red} style={{ padding: 14, marginBottom: 16 }}>
+          <Mono style={{ fontSize: 11, color: C.red }}>Smart money feed: {flowError}</Mono>
+        </Panel>
+      )}
+      {congress?.message && !flowError && (
         <Panel accent={C.accent} style={{ padding: 14, marginBottom: 16 }}>
           <Mono style={{ fontSize: 11, color: C.muted, lineHeight: 1.6 }}>{congress.message}</Mono>
         </Panel>
@@ -606,7 +661,7 @@ function FrameworkTab({ portfolio, signalData, attrData, avgSent, onAnalyze }) {
         <Label>THESIS Framework</Label>
         <div style={{ fontSize:13, color:C.muted, lineHeight:1.65, marginTop:6 }}>
           Systematic process: <b style={{color:C.text}}>Themes → Signals → Evidence → Sentiment → Invest → Review</b>.
-          Only size positions when multiple signals align. Not financial advice — edge comes from discipline.
+          Only size positions when multiple signals align.
         </div>
       </Panel>
 
@@ -756,8 +811,10 @@ Write an institutional report (valuation, earnings, technicals, risks, bull/bear
       }
       const data = await r.json();
       setQuote(data);
-      if (!data.sector && !data.market_cap) {
-        setError("Fundamentals empty — add ALPHA_VANTAGE_API_KEY on Render, redeploy backend, hard-refresh.");
+      if (!data.sector && !data.market_cap && data.price == null) {
+        setError("Fundamentals empty — add ALPHA_VANTAGE_API_KEY on Render, redeploy, hard-refresh.");
+      } else if (!data.sector && !data.market_cap) {
+        setError(null);
       }
     } catch (e) {
       setError(e.message || "Fetch failed");
@@ -1144,6 +1201,19 @@ export default function ThesisDashboard() {
   const news       = feed.data  ?? [];
   const attrData   = attr.data  ?? {};
   const signalData = signals.data ?? { themes:{}, tickers:{} };
+  const signalsFallback = Boolean(signals.data?.fallback);
+
+  useEffect(() => {
+    if (online !== true) return;
+    (async () => {
+      try {
+        await fetch(`${API}/api/bootstrap`, { method: "POST" });
+        setTimeout(() => {
+          pf.refetch(); feed.refetch(); signals.refetch(); flow.refetch(); flowStat.refetch();
+        }, 12_000);
+      } catch { /* ignore */ }
+    })();
+  }, [online]);
   const timeline   = portfolio?.timeline ?? [];
   const totalVal   = portfolio?.total_value  ?? 0;
   const totalRet   = portfolio?.total_return ?? 0;
@@ -1234,12 +1304,19 @@ export default function ThesisDashboard() {
 
       <main className="thesis-main" style={{ padding: "24px 28px", maxWidth: 1280, animation: "fadeUp 0.4s ease" }}>
 
+        <ApiBanner items={[
+          { label: "Portfolio", error: pf.error },
+          { label: "News", error: feed.error },
+          { label: "Signals", error: signals.error },
+          { label: "Smart money", error: flow.error },
+        ]} />
+
         {/* ══ OVERVIEW ══ */}
         {tab === "overview" && (<>
 
           <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:10, marginBottom:16 }}>
             {[
-              { label:"PORTFOLIO", value:pf.loading?null:f$(totalVal),     sub:"3-year thesis",          accent:C.accent },
+              { label:"PORTFOLIO", value:pf.loading?null:f$(totalVal),     sub:"From start of 2026",     accent:C.accent },
               { label:"RETURN",    value:pf.loading?null:fp(totalRet),      sub:"vs $15k cost basis",      accent:totalRet>=0?C.green:C.red },
               { label:"THEMES",    value:Object.keys(THEMES ?? {}).length,        sub:"investment buckets",      accent:C.muted },
               { label:"TICKERS",   value:px.loading?null:Object.keys(prices ?? {}).length||53, sub:"tracked positions", accent:C.muted },
@@ -1522,9 +1599,13 @@ export default function ThesisDashboard() {
                   </div>
                 ))}
               </div>
+            ) : feed.error ? (
+              <Mono style={{ fontSize:12, color:C.red, padding:40, textAlign:"center", display:"block" }}>
+                News failed to load: {feed.error}
+              </Mono>
             ) : filtNews.length === 0 ? (
               <Mono style={{ fontSize:12, color:C.dim, padding:40, textAlign:"center", display:"block" }}>
-                No articles found.
+                No articles yet — backend may still be fetching RSS. Click Refresh data, wait ~30s.
               </Mono>
             ) : (
               <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
@@ -1574,7 +1655,7 @@ export default function ThesisDashboard() {
 
         {/* ══ SIGNALS ══ */}
         {tab === "signals" && (
-          <SignalsTab signalData={signalData} signals={signals} />
+          <SignalsTab signalData={signalData} signals={signals} signalsError={signals.error} signalsFallback={signalsFallback} />
         )}
 
         {/* ══ ATTRIBUTION ══ */}
@@ -1705,6 +1786,7 @@ export default function ThesisDashboard() {
           <FlowTab
             flowData={flow.data}
             flowLoading={flow.loading}
+            flowError={flow.error}
             flowStatus={flowStat.data}
             signalData={signalData}
             onAnalyze={(tk) => { setAnalyzerFocus(tk); setTab("analyzer"); }}
