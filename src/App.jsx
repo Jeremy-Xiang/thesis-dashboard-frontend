@@ -499,10 +499,36 @@ function SignalsTab({ signalData, signals, signalsError, signalsFallback, signal
   );
 }
 
+const isWatchedPolitician = (name, watchlist = []) => {
+  const n = (name || "").toLowerCase();
+  return watchlist.some(p => {
+    const pl = p.toLowerCase();
+    return pl.includes(n) || n.includes(pl);
+  });
+};
+
+const sortCongressTrades = (trades, watchlist = []) => {
+  const rank = (name) => {
+    const n = (name || "").toLowerCase();
+    const idx = watchlist.findIndex(p => {
+      const pl = p.toLowerCase();
+      return pl.includes(n) || n.includes(pl);
+    });
+    return idx >= 0 ? idx : 999;
+  };
+  return [...trades].sort((a, b) => {
+    const ra = rank(a.politician);
+    const rb = rank(b.politician);
+    if (ra !== rb) return ra - rb;
+    return (b.filed || "").localeCompare(a.filed || "");
+  });
+};
+
 // ── Smart Money / Flow tab — congress + SEC insiders ─────────────────────────
 function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, signalData }) {
   const congress = flowData?.congress ?? {};
-  const trades = congress?.trades ?? [];
+  const watchlist = flowStatus?.watched_politicians ?? congress?.watched ?? [];
+  const trades = sortCongressTrades(congress?.trades ?? [], watchlist);
   const insiders = flowData?.insiders ?? [];
   const convergence = flowData?.convergence ?? [];
   const stats = flowData?.stats ?? {};
@@ -552,24 +578,31 @@ function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, sign
         <Panel style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between" }}>
             <Mono style={{ fontSize: 12, fontWeight: 600 }}>Congressional trades</Mono>
-            <Mono style={{ fontSize: 9, color: C.dim }}>watched politicians</Mono>
+            <Mono style={{ fontSize: 9, color: C.dim }}>watchlist first · then by date</Mono>
           </div>
           {flowLoading ? <Mono style={{ padding: 16, color: C.dim }}>Loading…</Mono>
-            : trades.length ? trades.slice(0, 12).map((t, i) => (
-              <div key={i} onClick={() => t.ticker && onAnalyze(t.ticker)}
-                style={{ padding: "10px 16px", borderBottom: `1px solid ${C.border}`, cursor: t.ticker ? "pointer" : "default" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <Mono style={{ fontSize: 12, fontWeight: 600, color: C.link }}>{t.ticker || "—"}</Mono>
+            : trades.length ? trades.slice(0, 18).map((t, i) => {
+              const watched = isWatchedPolitician(t.politician, watchlist);
+              return (
+              <div key={`${t.politician}-${t.ticker}-${t.filed}-${i}`} onClick={() => t.ticker && onAnalyze(t.ticker)}
+                style={{ padding: "10px 16px", borderBottom: `1px solid ${C.border}`, cursor: t.ticker ? "pointer" : "default",
+                  background: watched ? `${C.accent}08` : "transparent" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <Mono style={{ fontSize: 12, fontWeight: 600, color: C.link }}>{t.ticker || "—"}</Mono>
+                    <Mono style={{ fontSize: 10, color: watched ? C.accent : C.muted, display: "block", marginTop: 4, fontWeight: watched ? 600 : 400 }}>
+                      {t.politician || "—"}
+                    </Mono>
+                  </div>
                   <TxBadge tx={t.transaction} />
                 </div>
-                <Mono style={{ fontSize: 10, color: C.muted, display: "block", marginTop: 4 }}>{t.politician}</Mono>
                 <Mono style={{ fontSize: 9, color: C.dim }}>{t.amount_range || "—"} · filed {t.filed || "—"}</Mono>
                 {t.doc_url && (
                   <a href={t.doc_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
                     style={{ fontSize: 9, color: C.link, textDecoration: "underline", marginTop: 4, display: "inline-block" }}>PTR filing →</a>
                 )}
               </div>
-            )) : <Mono style={{ padding: 16, color: C.dim }}>No congress trades yet.</Mono>}
+            ); }) : <Mono style={{ padding: 16, color: C.dim }}>No congress trades yet.</Mono>}
         </Panel>
 
         <Panel style={{ padding: 0, overflow: "hidden" }}>
