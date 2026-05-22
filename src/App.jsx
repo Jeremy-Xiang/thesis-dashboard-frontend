@@ -65,6 +65,7 @@ function useApi(path, pollMs = null, opts = {}) {
   const run = useCallback(async () => {
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     let lastErr = null;
+    setLoading(true);
 
     for (let attempt = 0; attempt <= retries; attempt++) {
       const ctrl = new AbortController();
@@ -528,7 +529,7 @@ const groupTradesByPolitician = (trades, influential = []) => {
 };
 
 // ── Smart Money / Flow tab — congress + SEC insiders ─────────────────────────
-function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, signalData }) {
+function FlowTab({ flowData, flowLoading, flowInsidersLoading, flowError, flowStatus, onAnalyze, signalData }) {
   const congress = flowData?.congress ?? {};
   const influential = flowStatus?.influential_politicians ?? flowStatus?.watched_politicians ?? congress?.influential ?? [];
   const [polFilter, setPolFilter] = useState("All");
@@ -572,7 +573,12 @@ function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, sign
 
       {flowError && (
         <Panel accent={C.red} style={{ padding: 14, marginBottom: 16 }}>
-          <Mono style={{ fontSize: 11, color: C.red }}>Smart money feed: {flowError}</Mono>
+          <Mono style={{ fontSize: 11, color: C.red }}>Congress feed: {flowError}</Mono>
+        </Panel>
+      )}
+      {flowData?.partial && (
+        <Panel accent={C.yellow} style={{ padding: 12, marginBottom: 14 }}>
+          <Mono style={{ fontSize: 11, color: C.muted }}>SEC Form 4 still loading in background — click Refresh in ~1 min.</Mono>
         </Panel>
       )}
       {congress?.message && !flowError && (
@@ -607,7 +613,7 @@ function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, sign
               ))}
             </div>
           </div>
-          {flowLoading ? <Mono style={{ padding: 16, color: C.dim }}>Loading…</Mono>
+          {flowLoading ? <Mono style={{ padding: 16, color: C.dim }}>Loading congress…</Mono>
             : filteredGroups.length ? filteredGroups.map(({ name, trades: polTrades }) => (
               <div key={name}>
                 <div style={{ padding: "8px 16px", background: C.surfaceHi, borderBottom: `1px solid ${C.border}` }}>
@@ -636,8 +642,8 @@ function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, sign
           <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}` }}>
             <Mono style={{ fontSize: 12, fontWeight: 600 }}>SEC Form 4 — corporate insiders</Mono>
           </div>
-          {flowLoading ? <Mono style={{ padding: 16, color: C.dim }}>Loading…</Mono>
-            : insiders.slice(0, 10).map((t, i) => (
+          {flowInsidersLoading ? <Mono style={{ padding: 16, color: C.dim }}>Loading SEC Form 4…</Mono>
+            : insiders.length ? insiders.slice(0, 10).map((t, i) => (
               <div key={i} onClick={() => onAnalyze(t.ticker)}
                 style={{ padding: "10px 16px", borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -650,7 +656,7 @@ function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, sign
                     style={{ fontSize: 9, color: C.link, textDecoration: "underline", marginTop: 4, display: "inline-block" }}>SEC filing →</a>
                 )}
               </div>
-            ))}
+            )) : <Mono style={{ padding: 16, color: C.dim }}>No Form 4 filings yet.</Mono>}
         </Panel>
       </div>
 
@@ -671,7 +677,7 @@ function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, sign
             );
           })}
         </div>
-        {!convergence.length && !flowLoading && (
+        {!convergence.length && !flowLoading && !flowInsidersLoading && (
           <Mono style={{ fontSize: 11, color: C.dim }}>No overlap yet — refresh after signals train.</Mono>
         )}
       </Panel>
@@ -1424,8 +1430,32 @@ export default function ThesisDashboard() {
     retries: 2,
     keepStaleOnError: true,
   });
-  const flow      = useApi("/api/flow/universe", 3_600_000, { timeoutMs: 60_000, retries: 1 });
-  const flowStat  = useApi("/api/flow/status",       600_000);
+  const flowCongress = useApi("/api/flow/congress?days=365", 3_600_000, { timeoutMs: 30_000, retries: 2 });
+  const flowInsiders = useApi("/api/flow/insiders?days=120", 3_600_000, { timeoutMs: 90_000, retries: 1, keepStaleOnError: true });
+  const flowUniverse = useApi("/api/flow/universe", 3_600_000, { timeoutMs: 45_000, retries: 1, keepStaleOnError: true });
+  const flowStat  = useApi("/api/flow/status", 600_000, { timeoutMs: 15_000, retries: 1 });
+
+  const flowData = {
+    congress: flowCongress.data ?? { trades: [] },
+    insiders: flowInsiders.data?.filings ?? flowUniverse.data?.insiders ?? [],
+    convergence: flowUniverse.data?.convergence ?? [],
+    stats: {
+      congress_trades: flowCongress.data?.trades?.length ?? flowUniverse.data?.stats?.congress_trades ?? 0,
+      insider_filings: flowInsiders.data?.filings?.length ?? flowUniverse.data?.stats?.insider_filings ?? 0,
+      convergence_hits: flowUniverse.data?.convergence?.length ?? flowUniverse.data?.stats?.convergence_hits ?? 0,
+      congress_configured: flowCongress.data?.configured ?? true,
+    },
+    partial: flowUniverse.data?.partial,
+  };
+  const flowLoading = flowCongress.loading && !flowCongress.data;
+  const flowInsidersLoading = flowInsiders.loading && !flowInsiders.data?.filings?.length;
+  const flowError = flowCongress.error || (flowInsiders.error && !flowInsiders.data);
+  const refetchFlow = () => {
+    flowCongress.refetch();
+    flowInsiders.refetch();
+    flowUniverse.refetch();
+    flowStat.refetch();
+  };
 
   useEffect(() => { attr.refetch?.(); }, [period]);
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id); }, []);
@@ -1457,7 +1487,7 @@ export default function ThesisDashboard() {
       try {
         await fetch(`${API}/api/bootstrap`, { method: "POST" });
         setTimeout(() => {
-          pf.refetch(); feed.refetch(); signals.refetch(); flow.refetch(); flowStat.refetch();
+          pf.refetch(); feed.refetch(); signals.refetch(); refetchFlow();
         }, 12_000);
       } catch { /* ignore */ }
     })();
@@ -1497,7 +1527,7 @@ export default function ThesisDashboard() {
 
   const handleRefresh = async () => {
     await fetch(`${API}/api/refresh`, { method:"POST" }).catch(()=>{});
-    setTimeout(() => { pf.refetch(); px.refetch(); feed.refetch(); flow.refetch(); flowStat.refetch(); }, 2000);
+    setTimeout(() => { pf.refetch(); px.refetch(); feed.refetch(); refetchFlow(); }, 2000);
   };
 
   const NAV = [
@@ -1566,7 +1596,7 @@ export default function ThesisDashboard() {
           { label: "Portfolio", error: pf.error, hasData: !!pf.data },
           { label: "News", error: feed.error, hasData: (news?.length ?? 0) > 0 },
           { label: "Signals", error: signals.error, hasData: Object.keys(signalData?.themes ?? {}).length > 0 },
-          { label: "Smart money", error: flow.error, hasData: !!flow.data?.stats },
+          { label: "Smart money", error: flowError, hasData: (flowData?.congress?.trades?.length ?? 0) > 0 },
         ]} />
 
         {/* ══ OVERVIEW ══ */}
@@ -2058,9 +2088,10 @@ export default function ThesisDashboard() {
 
         {tab === "flow" && (
           <FlowTab
-            flowData={flow.data}
-            flowLoading={flow.loading}
-            flowError={flow.error}
+            flowData={flowData}
+            flowLoading={flowLoading}
+            flowInsidersLoading={flowInsidersLoading}
+            flowError={flowError}
             flowStatus={flowStat.data}
             signalData={signalData}
             onAnalyze={(tk) => { setAnalyzerFocus(tk); setTab("analyzer"); }}
@@ -2074,7 +2105,7 @@ export default function ThesisDashboard() {
             signalData={signalData}
             attrData={attrData}
             avgSent={avgSent}
-            flowData={flow.data}
+            flowData={flowData}
             onAnalyze={(tk) => { setAnalyzerFocus(tk); setTab("analyzer"); }}
           />
         )}
