@@ -499,36 +499,43 @@ function SignalsTab({ signalData, signals, signalsError, signalsFallback, signal
   );
 }
 
-const isWatchedPolitician = (name, watchlist = []) => {
+const politicianRank = (name, influential = []) => {
   const n = (name || "").toLowerCase();
-  return watchlist.some(p => {
+  const idx = influential.findIndex(p => {
     const pl = p.toLowerCase();
     return pl.includes(n) || n.includes(pl);
   });
+  return idx >= 0 ? idx : 999;
 };
 
-const sortCongressTrades = (trades, watchlist = []) => {
-  const rank = (name) => {
-    const n = (name || "").toLowerCase();
-    const idx = watchlist.findIndex(p => {
-      const pl = p.toLowerCase();
-      return pl.includes(n) || n.includes(pl);
-    });
-    return idx >= 0 ? idx : 999;
-  };
-  return [...trades].sort((a, b) => {
-    const ra = rank(a.politician);
-    const rb = rank(b.politician);
-    if (ra !== rb) return ra - rb;
-    return (b.filed || "").localeCompare(a.filed || "");
+const groupTradesByPolitician = (trades, influential = []) => {
+  const byPol = {};
+  trades.forEach(t => {
+    const p = (t.politician || "Unknown").trim();
+    if (!byPol[p]) byPol[p] = [];
+    byPol[p].push(t);
   });
+  Object.values(byPol).forEach(list =>
+    list.sort((a, b) => (b.filed || "").localeCompare(a.filed || ""))
+  );
+  const names = Object.keys(byPol).sort((a, b) => {
+    const ra = politicianRank(a, influential);
+    const rb = politicianRank(b, influential);
+    if (ra !== rb) return ra - rb;
+    return a.localeCompare(b);
+  });
+  return names.map(name => ({ name, trades: byPol[name] }));
 };
 
 // ── Smart Money / Flow tab — congress + SEC insiders ─────────────────────────
 function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, signalData }) {
   const congress = flowData?.congress ?? {};
-  const watchlist = flowStatus?.watched_politicians ?? congress?.watched ?? [];
-  const trades = sortCongressTrades(congress?.trades ?? [], watchlist);
+  const influential = flowStatus?.influential_politicians ?? flowStatus?.watched_politicians ?? congress?.influential ?? [];
+  const [polFilter, setPolFilter] = useState("All");
+  const polGroups = groupTradesByPolitician(congress?.trades ?? [], influential);
+  const filteredGroups = polFilter === "All"
+    ? polGroups
+    : polGroups.filter(g => g.name === polFilter || politicianRank(g.name, influential) === politicianRank(polFilter, influential));
   const insiders = flowData?.insiders ?? [];
   const convergence = flowData?.convergence ?? [];
   const stats = flowData?.stats ?? {};
@@ -560,7 +567,7 @@ function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, sign
         <StatTile label="Congress trades" value={stats.congress_trades ?? "—"} sub={congress?.source === "stonkwhisper" ? "StonkWhisper" : "Public disclosures"} accent={C.accent} loading={flowLoading} />
         <StatTile label="Form 4 filings" value={stats.insider_filings ?? "—"} sub="SEC EDGAR (free)" accent={C.green} loading={flowLoading} />
         <StatTile label="Confluence" value={stats.convergence_hits ?? "—"} sub="overlap w/ signals" accent={C.yellow} loading={flowLoading} />
-        <StatTile label="Tracked reps" value={status.watched_politicians?.length ?? 8} sub="Pelosi + watchlist" loading={false} />
+        <StatTile label="Tracked reps" value={influential.length || status.watched_politicians?.length || 14} sub="influence-ranked" loading={false} />
       </div>
 
       {flowError && (
@@ -576,33 +583,53 @@ function FlowTab({ flowData, flowLoading, flowError, flowStatus, onAnalyze, sign
 
       <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 14, marginBottom: 14 }}>
         <Panel style={{ padding: 0, overflow: "hidden" }}>
-          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between" }}>
+          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}` }}>
             <Mono style={{ fontSize: 12, fontWeight: 600 }}>Congressional trades</Mono>
-            <Mono style={{ fontSize: 9, color: C.dim }}>watchlist first · then by date</Mono>
+            <Mono style={{ fontSize: 9, color: C.dim, display: "block", marginTop: 4, lineHeight: 1.5 }}>
+              Grouped by politician (influence rank). Tracked: Pelosi, Gottheimer, Tuberville, McCaul, Khanna, Warner + 8 more.
+            </Mono>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+              <button type="button" onClick={() => setPolFilter("All")} style={{
+                padding: "3px 8px", fontSize: 9, borderRadius: 3, cursor: "pointer",
+                fontFamily: "'IBM Plex Mono', monospace",
+                background: polFilter === "All" ? C.accent : "transparent",
+                color: polFilter === "All" ? C.bg : C.muted,
+                border: `1px solid ${polFilter === "All" ? C.accent : C.border}`,
+              }}>ALL</button>
+              {polGroups.slice(0, 10).map(g => (
+                <button key={g.name} type="button" onClick={() => setPolFilter(g.name)} style={{
+                  padding: "3px 8px", fontSize: 9, borderRadius: 3, cursor: "pointer",
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  background: polFilter === g.name ? C.accent : "transparent",
+                  color: polFilter === g.name ? C.bg : C.muted,
+                  border: `1px solid ${polFilter === g.name ? C.accent : C.border}`,
+                }} title={g.name}>{g.name.split(" ").slice(-1)[0]}</button>
+              ))}
+            </div>
           </div>
           {flowLoading ? <Mono style={{ padding: 16, color: C.dim }}>Loading…</Mono>
-            : trades.length ? trades.slice(0, 18).map((t, i) => {
-              const watched = isWatchedPolitician(t.politician, watchlist);
-              return (
-              <div key={`${t.politician}-${t.ticker}-${t.filed}-${i}`} onClick={() => t.ticker && onAnalyze(t.ticker)}
-                style={{ padding: "10px 16px", borderBottom: `1px solid ${C.border}`, cursor: t.ticker ? "pointer" : "default",
-                  background: watched ? `${C.accent}08` : "transparent" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <Mono style={{ fontSize: 12, fontWeight: 600, color: C.link }}>{t.ticker || "—"}</Mono>
-                    <Mono style={{ fontSize: 10, color: watched ? C.accent : C.muted, display: "block", marginTop: 4, fontWeight: watched ? 600 : 400 }}>
-                      {t.politician || "—"}
-                    </Mono>
-                  </div>
-                  <TxBadge tx={t.transaction} />
+            : filteredGroups.length ? filteredGroups.map(({ name, trades: polTrades }) => (
+              <div key={name}>
+                <div style={{ padding: "8px 16px", background: C.surfaceHi, borderBottom: `1px solid ${C.border}` }}>
+                  <Mono style={{ fontSize: 11, fontWeight: 700, color: C.text }}>{name}</Mono>
+                  <Mono style={{ fontSize: 9, color: C.dim, marginLeft: 8 }}>{polTrades.length} filing{polTrades.length !== 1 ? "s" : ""}</Mono>
                 </div>
-                <Mono style={{ fontSize: 9, color: C.dim }}>{t.amount_range || "—"} · filed {t.filed || "—"}</Mono>
-                {t.doc_url && (
-                  <a href={t.doc_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
-                    style={{ fontSize: 9, color: C.link, textDecoration: "underline", marginTop: 4, display: "inline-block" }}>PTR filing →</a>
-                )}
+                {polTrades.slice(0, 8).map((t, i) => (
+                  <div key={`${name}-${t.ticker}-${t.filed}-${i}`} onClick={() => t.ticker && onAnalyze(t.ticker)}
+                    style={{ padding: "10px 16px 10px 24px", borderBottom: `1px solid ${C.border}`, cursor: t.ticker ? "pointer" : "default" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <Mono style={{ fontSize: 12, fontWeight: 600, color: C.link }}>{t.ticker || "—"}</Mono>
+                      <TxBadge tx={t.transaction} />
+                    </div>
+                    <Mono style={{ fontSize: 9, color: C.dim }}>{t.amount_range || "—"} · filed {t.filed || "—"}</Mono>
+                    {t.doc_url && (
+                      <a href={t.doc_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                        style={{ fontSize: 9, color: C.link, textDecoration: "underline", marginTop: 4, display: "inline-block" }}>PTR filing →</a>
+                    )}
+                  </div>
+                ))}
               </div>
-            ); }) : <Mono style={{ padding: 16, color: C.dim }}>No congress trades yet.</Mono>}
+            )) : <Mono style={{ padding: 16, color: C.dim }}>No congressional trades yet.</Mono>}
         </Panel>
 
         <Panel style={{ padding: 0, overflow: "hidden" }}>
