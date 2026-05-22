@@ -50,34 +50,59 @@ const PERIODS = ["1m","3m","6m","1y","3y"];
 // ── Data fetching ─────────────────────────────────────────────────────────────
 const FETCH_TIMEOUT_MS = 90_000;
 
-function useApi(path, pollMs = null) {
+function useApi(path, pollMs = null, opts = {}) {
+  const {
+    timeoutMs = FETCH_TIMEOUT_MS,
+    retries = 0,
+    keepStaleOnError = false,
+  } = opts;
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
   const [updated, setUpdated] = useState(null);
+  const dataRef = useRef(null);
 
   const run = useCallback(async () => {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-    try {
-      const r = await fetch(`${API}${path}`, { signal: ctrl.signal, cache: "no-store" });
-      if (!r.ok) {
-        const e = await r.json().catch(() => ({}));
-        throw new Error(e.detail || `HTTP ${r.status}`);
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    let lastErr = null;
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const r = await fetch(`${API}${path}`, { signal: ctrl.signal, cache: "no-store" });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          throw new Error(e.detail || `HTTP ${r.status}`);
+        }
+        const json = await r.json();
+        dataRef.current = json;
+        setData(json);
+        setError(null);
+        setUpdated(new Date());
+        setLoading(false);
+        clearTimeout(timer);
+        return;
+      } catch (e) {
+        clearTimeout(timer);
+        lastErr = e;
+        if (attempt < retries) {
+          await sleep(1500 * (attempt + 1));
+          continue;
+        }
       }
-      setData(await r.json());
-      setError(null);
-      setUpdated(new Date());
-    } catch (e) {
-      const msg = e.name === "AbortError"
-        ? "Request timed out — backend may be waking up; try Refresh"
-        : (e.message || "fetch failed");
-      setError(msg);
-    } finally {
-      clearTimeout(timer);
-      setLoading(false);
     }
-  }, [path]);
+
+    const msg = lastErr?.name === "AbortError"
+      ? "Request timed out — backend may be waking up; try Refresh"
+      : (lastErr?.message || "fetch failed");
+    if (keepStaleOnError && dataRef.current) {
+      setError(null);
+    } else {
+      setError(msg);
+    }
+    setLoading(false);
+  }, [path, timeoutMs, retries, keepStaleOnError]);
 
   useEffect(() => {
     run();
@@ -130,7 +155,7 @@ const Label = ({ children }) => (
 const Divider = () => <div style={{ height:1, background:C.border, margin:"0" }} />;
 
 const ApiBanner = ({ items }) => {
-  const bad = items.filter(x => x.error);
+  const bad = items.filter(x => x.error && !x.hasData);
   if (!bad.length) return null;
   return (
     <Panel accent={C.red} style={{ padding: 12, marginBottom: 14 }}>
@@ -1334,8 +1359,12 @@ export default function ThesisDashboard() {
   const px      = useApi("/api/prices",              60_000);
   const feed    = useApi("/api/news?limit=2000",     300_000);
   const attr    = useApi(`/api/attribution?period=${period}`, null);
-  const signals = useApi("/api/signals",             3_600_000);
-  const flow      = useApi("/api/flow/universe",     3_600_000);
+  const signals = useApi("/api/signals", 3_600_000, {
+    timeoutMs: 35_000,
+    retries: 2,
+    keepStaleOnError: true,
+  });
+  const flow      = useApi("/api/flow/universe", 3_600_000, { timeoutMs: 60_000, retries: 1 });
   const flowStat  = useApi("/api/flow/status",       600_000);
 
   useEffect(() => { attr.refetch?.(); }, [period]);
@@ -1355,8 +1384,10 @@ export default function ThesisDashboard() {
   useEffect(() => {
     const themes = Object.keys(signals.data?.themes ?? {});
     const tickers = Object.keys(signals.data?.tickers ?? {});
+    const training = signals.data?.training;
     if (!themes.length || tickers.length >= 10 || signals.loading) return;
-    const id = setInterval(() => signals.refetch(), 25_000);
+    const ms = training ? 20_000 : 45_000;
+    const id = setInterval(() => signals.refetch(), ms);
     return () => clearInterval(id);
   }, [signals.data, signals.loading]);
 
@@ -1472,10 +1503,10 @@ export default function ThesisDashboard() {
       <main className="thesis-main" style={{ padding: "24px 28px", maxWidth: 1280, animation: "fadeUp 0.4s ease" }}>
 
         <ApiBanner items={[
-          { label: "Portfolio", error: pf.error },
-          { label: "News", error: feed.error },
-          { label: "Signals", error: signals.error },
-          { label: "Smart money", error: flow.error },
+          { label: "Portfolio", error: pf.error, hasData: !!pf.data },
+          { label: "News", error: feed.error, hasData: (news?.length ?? 0) > 0 },
+          { label: "Signals", error: signals.error, hasData: Object.keys(signalData?.themes ?? {}).length > 0 },
+          { label: "Smart money", error: flow.error, hasData: !!flow.data?.stats },
         ]} />
 
         {/* ══ OVERVIEW ══ */}
