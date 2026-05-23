@@ -183,6 +183,17 @@ const SigBadge = ({ signal }) => {
   );
 };
 
+const ConfBadge = ({ tier }) => {
+  if (!tier) return null;
+  const col = tier === "high" ? C.green : tier === "medium" ? C.yellow : C.dim;
+  return (
+    <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 2,
+      background: col + "18", color: col, fontFamily: "'IBM Plex Mono', monospace" }}>
+      {tier.toUpperCase()} CONF
+    </span>
+  );
+};
+
 const ThemeTag = ({ theme }) => {
   const cfg = THEMES[theme];
   if (!cfg) return null;
@@ -255,6 +266,7 @@ function SignalsTab({ signalData, signals, signalsError, signalsFallback, signal
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError,   setLookupError]   = useState(null);
   const [themeFilter,   setThemeFilter]   = useState("All");
+  const [highConviction, setHighConviction] = useState(false);
 
   const lookup = async () => {
     const t = customTicker.trim().toUpperCase();
@@ -278,9 +290,13 @@ function SignalsTab({ signalData, signals, signalsError, signalsFallback, signal
     ? Object.entries(tickerSigs)
     : Object.entries(tickerSigs).filter(([tk]) => themeTickerMap[tk] === themeFilter);
 
-  const sorted = [...filtered].sort((a,b) => b[1].outperform_prob - a[1].outperform_prob);
+  const sorted = [...filtered]
+    .filter(([, sig]) => !highConviction || (sig.confidence === "high" || sig.confidence === "medium"))
+    .filter(([, sig]) => !highConviction || sig.signal === "BUY" || sig.outperform_prob >= 0.58)
+    .sort((a, b) => b[1].outperform_prob - a[1].outperform_prob);
 
   const sigCol = s => s === "BUY" ? C.green : s === "TRIM" ? C.red : C.yellow;
+  const nFeatures = signalData?.feature_cols?.length ?? 10;
 
   return (
     <div>
@@ -308,10 +324,18 @@ function SignalsTab({ signalData, signals, signalsError, signalsFallback, signal
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:20 }}>
         <div style={{ fontSize:13, fontWeight:600 }}>Prediction Signals</div>
         <Mono style={{ fontSize:11, color:C.muted }}>
-          Random Forest · 30-day outperformance vs SPY
-          {signals.data?.trained_at && ` · trained ${new Date(signals.data.trained_at).toLocaleDateString()}`}
+          RF · {nFeatures} features · AUC-calibrated · 30d vs SPY
+          {signals.data?.trained_at && ` · ${new Date(signals.data.trained_at).toLocaleDateString()}`}
         </Mono>
       </div>
+
+
+      <Panel style={{ marginBottom: 14, padding: 14 }}>
+        <Mono style={{ fontSize: 11, color: C.muted, lineHeight: 1.65 }}>
+          Model uses momentum, relative strength vs SPY, volatility, market regime, mean-reversion, and live news sentiment.
+          Probabilities are <b style={{ color: C.text }}>shrunk toward 50%</b> when backtest AUC is weak — low-confidence models default to HOLD.
+        </Mono>
+      </Panel>
 
       {/* Custom lookup */}
       <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, padding:16, marginBottom:16 }}>
@@ -404,7 +428,7 @@ function SignalsTab({ signalData, signals, signalsError, signalsFallback, signal
 
               <div style={{ marginTop:10 }}>
                 <Mono style={{ fontSize:10, color:C.dim }}>
-                  AUC {lookupResult.auc?.toFixed(3)} · {lookupResult.n_samples} training days · {lookupResult.source}
+                  AUC {lookupResult.auc?.toFixed(3)} · {lookupResult.confidence} conf · raw {Math.round((lookupResult.raw_prob ?? lookupResult.outperform_prob)*100)}% · {lookupResult.n_samples} days · {lookupResult.source}
                 </Mono>
               </div>
             </div>
@@ -426,11 +450,11 @@ function SignalsTab({ signalData, signals, signalsError, signalsFallback, signal
                   border:`1px solid ${C.border}`, borderRadius:4, borderTop:`2px solid ${col}` }}>
                   <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
                     <Mono style={{ fontSize:10, color:cfg.color }}>{cfg.short}</Mono>
-                    <SigBadge signal={sig.signal} />
+                    <div style={{ display:"flex", gap:4 }}><ConfBadge tier={sig.confidence} /><SigBadge signal={sig.signal} /></div>
                   </div>
                   <div style={{ fontSize:20, fontWeight:800, color:col, fontFamily:"'IBM Plex Mono',monospace", marginBottom:6 }}>{prob}%</div>
                   <ProbBar prob={sig.outperform_prob} color={col} />
-                  <Mono style={{ fontSize:9, color:C.dim, marginTop:6 }}>AUC {sig.auc?.toFixed(2)}</Mono>
+                  <Mono style={{ fontSize:9, color:C.dim, marginTop:6 }}>AUC {sig.auc?.toFixed(2)} · {sig.confidence || "—"} conf</Mono>
                 </div>
               );
             })}
@@ -451,6 +475,13 @@ function SignalsTab({ signalData, signals, signalsError, signalsFallback, signal
             {t === "All" ? "ALL" : THEMES[t].short}
           </button>
         ))}
+        <button type="button" onClick={() => setHighConviction(v => !v)} style={{
+          padding:"4px 10px", borderRadius:2, fontSize:10, fontFamily:"'IBM Plex Mono',monospace",
+          cursor:"pointer", letterSpacing:"0.05em",
+          color: highConviction ? C.bg : C.muted,
+          background: highConviction ? C.green : "transparent",
+          border: `1px solid ${highConviction ? C.green : C.border}`,
+        }}>{highConviction ? "HIGH CONVICTION" : "ALL TICKERS"}</button>
         <Mono style={{ marginLeft:"auto", fontSize:10, color:C.dim }}>
           {sorted.length} tickers · sorted by probability
         </Mono>
@@ -486,12 +517,15 @@ function SignalsTab({ signalData, signals, signalsError, signalsFallback, signal
                   <div style={{ marginTop:3 }}><ThemeTag theme={theme} /></div>
                 </div>
                 <div style={{ textAlign:"right" }}>
-                  <SigBadge signal={sig.signal} />
+                  <div style={{ display:"flex", gap:4, justifyContent:"flex-end" }}>
+                    <ConfBadge tier={sig.confidence} />
+                    <SigBadge signal={sig.signal} />
+                  </div>
                   <Mono style={{ fontSize:11, color:C.muted, display:"block", marginTop:4 }}>{prob}%</Mono>
                 </div>
               </div>
               <ProbBar prob={sig.outperform_prob} color={col} />
-              <Mono style={{ fontSize:9, color:C.dim, marginTop:6 }}>AUC {sig.auc?.toFixed(2)}</Mono>
+              <Mono style={{ fontSize:9, color:C.dim, marginTop:6 }}>AUC {sig.auc?.toFixed(2)} · {sig.confidence || "—"} conf</Mono>
             </div>
           );
         })}
@@ -753,7 +787,7 @@ function FrameworkTab({ portfolio, signalData, attrData, avgSent, flowData, onAn
     const sent = avgSent[tk] ?? 0.5;
     const theme = themeForTicker(tk);
     const themeAlpha = attrRows.find(r => r.name === theme)?.alpha ?? 0;
-    const row = { tk, prob, sent, signal: sig.signal, theme, themeAlpha, size: suggestPositionSize(tk) };
+    const row = { tk, prob, sent, signal: sig.signal, confidence: sig.confidence, theme, themeAlpha, size: suggestPositionSize(tk) };
 
     if (prob >= 0.6 && sent >= 0.55) {
       const tier = prob >= 0.65 && sent >= 0.58 && themeAlpha > 0 ? "A" : prob >= 0.62 ? "B" : "C";
@@ -779,7 +813,7 @@ function FrameworkTab({ portfolio, signalData, attrData, avgSent, flowData, onAn
   );
 
   const alignmentRows = buys.slice(0, 8).map(row => {
-    const mlBuy = row.signal === "BUY";
+    const mlBuy = row.signal === "BUY" && row.confidence !== "low";
     const themeOk = row.themeAlpha > 0;
     const sentOk = row.sent >= 0.55;
     const congressOk = congressBuys.has(row.tk);
@@ -1627,7 +1661,7 @@ export default function ThesisDashboard() {
                     style={{ padding:"10px 14px" }}>
                     <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
                       <Mono style={{ fontSize:10, color:cfg.color }}>{cfg.short}</Mono>
-                      <SigBadge signal={sig.signal} />
+                      <div style={{ display:"flex", gap:4 }}><ConfBadge tier={sig.confidence} /><SigBadge signal={sig.signal} /></div>
                     </div>
                     <Mono style={{ fontSize:18, fontWeight:700, color:col }}>{prob}%</Mono>
                     <ProbBar prob={sig.outperform_prob} color={col} />
