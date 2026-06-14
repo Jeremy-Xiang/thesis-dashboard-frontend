@@ -85,6 +85,35 @@ const STOCKS = [
   { ticker: "META", company: "Meta Platforms", sector: "Technology", price: 742.60, chg1d: 0.2, spark: [718, 724, 721, 730, 728, 736, 740, 742.6] },
 ];
 
+/* ----------------------------------------------------------------------------
+   LIVE STOCK LOOKUP
+   ----------------------------------------------------------------------------
+   Set QUOTE_API to your own quote endpoint so search covers ANY ticker,
+   including new listings not in the bundled STOCKS array. Expected response:
+     { ticker, company, sector, price, chg1d, spark:[...] }
+   Recommended: a tiny Cloudflare Worker that proxies Finnhub/FMP (keeps your
+   API key server-side and adds CORS headers). Example worker route:
+     GET https://data.thesis.jeremyxiang.com/quote?ticker=NVDA
+   If QUOTE_API is null or the fetch fails, lookup falls back to the bundled
+   list, and any typed ticker can still be tracked as "awaiting quote".
+--------------------------------------------------------------------------- */
+const QUOTE_API = null; // e.g. "https://data.thesis.jeremyxiang.com/quote"
+
+async function fetchQuote(ticker) {
+  const sym = ticker.trim().toUpperCase();
+  if (!sym) return null;
+  if (QUOTE_API) {
+    try {
+      const r = await fetch(`${QUOTE_API}?ticker=${encodeURIComponent(sym)}`);
+      if (r.ok) {
+        const q = await r.json();
+        if (q && q.price != null) return q;
+      }
+    } catch { /* fall through to bundled */ }
+  }
+  return STOCKS.find((s) => s.ticker === sym) || null;
+}
+
 /* ------------------------------------------------------------------------- */
 
 function useThesisData() {
@@ -103,7 +132,18 @@ const fmtDate = (d) => new Date(d).toLocaleDateString("en-US", { month: "short",
 export default function ThesisApp() {
   const { members, trades, stocks, meta } = useThesisData();
   const [followed, setFollowed] = useState(new Set(["m2", "m3", "m7"]));
-  const [tracked, setTracked] = useState(new Set(["NVDA", "LMT", "PLTR"]));
+  const [tracked, setTracked] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("thesis:tracked") || "null");
+      if (Array.isArray(saved)) return new Set(saved);
+    } catch { /* ignore */ }
+    return new Set(["NVDA", "LMT", "PLTR"]);
+  });
+  useEffect(() => {
+    try { localStorage.setItem("thesis:tracked", JSON.stringify([...tracked])); } catch { /* ignore */ }
+  }, [tracked]);
+  /* Quotes discovered via live search, keyed by ticker, merged with bundled STOCKS */
+  const [liveQuotes, setLiveQuotes] = useState({});
   const [stockQuery, setStockQuery] = useState("");
   const [openStock, setOpenStock] = useState(null);
   const [tab, setTab] = useState("tape");
@@ -114,6 +154,13 @@ export default function ThesisApp() {
   const [expanded, setExpanded] = useState(null);
 
   const memberById = useMemo(() => Object.fromEntries(members.map((m) => [m.id, m])), [members]);
+
+  /* Bundled stocks + any tickers discovered through live search */
+  const allStocks = useMemo(() => {
+    const map = Object.fromEntries(stocks.map((s) => [s.ticker, s]));
+    Object.values(liveQuotes).forEach((q) => { map[q.ticker] = { ...map[q.ticker], ...q }; });
+    return Object.values(map);
+  }, [stocks, liveQuotes]);
 
   const toggleFollow = (id) =>
     setFollowed((prev) => {
@@ -147,7 +194,7 @@ export default function ThesisApp() {
   /* Recommendation screen: rank tickers by congressional conviction.
      This is a screen, not advice — the "why" list shows every input. */
   const recommendations = useMemo(() => {
-    return stocks
+    return allStocks
       .map((s) => {
         const f = flowByTicker[s.ticker];
         if (!f || f.buys === 0) return null;
@@ -172,14 +219,14 @@ export default function ThesisApp() {
       })
       .filter(Boolean)
       .sort((a, b) => b.score - a.score);
-  }, [stocks, flowByTicker]);
+  }, [allStocks, flowByTicker]);
 
   const exits = useMemo(
-    () => stocks.filter((s) => {
+    () => allStocks.filter((s) => {
       const f = flowByTicker[s.ticker];
       return f && f.sells > f.buys;
     }),
-    [stocks, flowByTicker]
+    [allStocks, flowByTicker]
   );
 
 
@@ -354,7 +401,7 @@ export default function ThesisApp() {
 
           {tab === "stocks" && (
             <StocksPanel
-              stocks={stocks}
+              stocks={allStocks}
               tracked={tracked}
               toggleTrack={toggleTrack}
               flowByTicker={flowByTicker}
@@ -364,6 +411,8 @@ export default function ThesisApp() {
               setStockQuery={setStockQuery}
               openStock={openStock}
               setOpenStock={setOpenStock}
+              liveQuotes={liveQuotes}
+              setLiveQuotes={setLiveQuotes}
             />
           )}
 
@@ -529,16 +578,53 @@ function Sparkline({ data, up }) {
 }
 
 function StocksPanel({ stocks, tracked, toggleTrack, flowByTicker, trades, memberById,
-                       stockQuery, setStockQuery, openStock, setOpenStock }) {
+                       stockQuery, setStockQuery, openStock, setOpenStock,
+                       liveQuotes, setLiveQuotes }) {
+  const [lookup, setLookup] = useState({ state: "idle", quote: null, sym: "" });
+  const byTicker = Object.fromEntries(stocks.map((s) => [s.ticker, s]));
+
+  /* Local matches across the loaded universe (bundled + already-discovered) */
   const q = stockQuery.trim().toLowerCase();
-  const results = q
-    ? stocks.filter((s) => s.ticker.toLowerCase().includes(q) || s.company.toLowerCase().includes(q) || s.sector.toLowerCase().includes(q))
+  const localResults = q
+    ? stocks.filter((s) =>
+        s.ticker.toLowerCase().includes(q) ||
+        (s.company || "").toLowerCase().includes(q) ||
+        (s.sector || "").toLowerCase().includes(q))
     : [];
-  const trackedStocks = stocks.filter((s) => tracked.has(s.ticker));
+
+  /* Debounced live lookup so search reaches ANY ticker, incl. new listings */
+  useEffect(() => {
+    const sym = stockQuery.trim().toUpperCase();
+    if (!sym || localResults.length > 0) { setLookup({ state: "idle", quote: null, sym: "" }); return; }
+    let cancelled = false;
+    setLookup({ state: "loading", quote: null, sym });
+    const id = setTimeout(async () => {
+      const quote = await fetchQuote(sym);
+      if (cancelled) return;
+      if (quote) {
+        setLiveQuotes((prev) => ({ ...prev, [quote.ticker]: quote }));
+        setLookup({ state: "found", quote, sym });
+      } else {
+        setLookup({ state: "notfound", quote: null, sym });
+      }
+    }, 450);
+    return () => { cancelled = true; clearTimeout(id); };
+  }, [stockQuery]); // eslint-disable-line
+
+  /* Hydrate quotes for tracked tickers we don't have data for yet */
+  useEffect(() => {
+    [...tracked].filter((t) => !byTicker[t]).forEach(async (t) => {
+      const quote = await fetchQuote(t);
+      if (quote) setLiveQuotes((prev) => ({ ...prev, [quote.ticker]: quote }));
+    });
+  }, [tracked]); // eslint-disable-line
+
+  const trackedStocks = [...tracked].map((t) => byTicker[t] || { ticker: t, pending: true });
 
   const row = (s) => {
     const f = flowByTicker[s.ticker];
     const open = openStock === s.ticker;
+    const hasQuote = s.price != null;
     const tickerTrades = trades
       .filter((t) => t.ticker === s.ticker)
       .sort((a, b) => new Date(b.filedDate) - new Date(a.filedDate));
@@ -548,18 +634,19 @@ function StocksPanel({ stocks, tracked, toggleTrack, flowByTicker, trades, membe
           <button className="th-stockrow-main" onClick={() => setOpenStock(open ? null : s.ticker)} aria-expanded={open}>
             <span className="th-ticker th-stock-ticker">{s.ticker}</span>
             <span className="th-stock-co">
-              <span>{s.company}</span>
-              <span className="th-stock-sector">{s.sector}</span>
+              <span>{s.company || (s.pending ? "Awaiting quote…" : s.ticker)}</span>
+              {s.sector && <span className="th-stock-sector">{s.sector}</span>}
             </span>
-            <Sparkline data={s.spark} up={s.spark[s.spark.length - 1] >= s.spark[0]} />
-            <span className="th-stock-px">${s.price.toFixed(2)}</span>
-            <span className={`th-cell-ret ${s.chg1d >= 0 ? "pos" : "neg"}`}>
-              {s.chg1d >= 0 ? "+" : ""}{s.chg1d}%
+            {hasQuote && s.spark
+              ? <Sparkline data={s.spark} up={s.spark[s.spark.length - 1] >= s.spark[0]} />
+              : <span className="th-spark" />}
+            <span className="th-stock-px">{hasQuote ? `$${s.price.toFixed(2)}` : "—"}</span>
+            <span className={`th-cell-ret ${hasQuote && s.chg1d >= 0 ? "pos" : hasQuote ? "neg" : ""}`}>
+              {hasQuote ? `${s.chg1d >= 0 ? "+" : ""}${s.chg1d}%` : ""}
             </span>
             <span className="th-stock-flow">
-              {f ? <>
-                <span className="pos">{f.buys}B</span>/<span className="neg">{f.sells}S</span>
-              </> : <span className="th-stock-noflow">no filings</span>}
+              {f ? <><span className="pos">{f.buys}B</span>/<span className="neg">{f.sells}S</span></>
+                 : <span className="th-stock-noflow">no filings</span>}
             </span>
           </button>
           <button className={`th-follow ${tracked.has(s.ticker) ? "th-follow-on" : ""}`}
@@ -595,30 +682,59 @@ function StocksPanel({ stocks, tracked, toggleTrack, flowByTicker, trades, membe
     );
   };
 
+  const typedSym = stockQuery.trim().toUpperCase();
+  const canTrackTyped = typedSym && !tracked.has(typedSym);
+
   return (
     <>
-      <input
-        className="th-search th-stock-search"
-        placeholder="Search any stock — ticker, company, or sector…"
-        value={stockQuery}
-        onChange={(e) => setStockQuery(e.target.value)}
-        aria-label="Search stocks"
-      />
+      {/* ── Search any stock ──────────────────────────────────────────── */}
+      <div className="th-stock-searchbar">
+        <input
+          className="th-search th-stock-search"
+          placeholder="Search any stock — type a ticker (NVDA, COIN, any new listing)…"
+          value={stockQuery}
+          onChange={(e) => setStockQuery(e.target.value)}
+          aria-label="Search any stock"
+        />
+        {QUOTE_API == null && (
+          <span className="th-stock-hint">Live quotes activate once you wire QUOTE_API · any typed ticker is still trackable</span>
+        )}
+      </div>
 
       {q && (
         <>
-          <div className="th-section-h">Results · {results.length}</div>
-          {results.map(row)}
-          {results.length === 0 && (
-            <div className="th-empty">No match for “{stockQuery}”. Try a ticker like NVDA or a sector like Defense.</div>
+          <div className="th-section-h">Results · {localResults.length + (lookup.state === "found" ? 1 : 0)}</div>
+          {localResults.map(row)}
+          {localResults.length === 0 && lookup.state === "loading" && (
+            <div className="th-empty">Looking up “{lookup.sym}”…</div>
+          )}
+          {localResults.length === 0 && lookup.state === "found" && lookup.quote && row(lookup.quote)}
+          {localResults.length === 0 && lookup.state === "notfound" && (
+            <div className="th-lookup-miss">
+              <span>No quote found for “{lookup.sym}” yet.</span>
+              {canTrackTyped && (
+                <button className="th-follow" onClick={() => toggleTrack(typedSym)}>
+                  Track {typedSym} anyway
+                </button>
+              )}
+            </div>
+          )}
+          {localResults.length > 0 && canTrackTyped && !byTicker[typedSym] && (
+            <button className="th-track-typed" onClick={() => toggleTrack(typedSym)}>
+              + Track {typedSym} directly
+            </button>
           )}
         </>
       )}
 
-      <div className="th-section-h">Tracked · {trackedStocks.length}</div>
+      {/* ── Your tracked stocks (client-side, persists in this browser) ── */}
+      <div className="th-track-header">
+        <div className="th-section-h">Your tracked stocks · {trackedStocks.length}</div>
+        <span className="th-track-sub">Saved in this browser</span>
+      </div>
       {trackedStocks.map(row)}
       {trackedStocks.length === 0 && (
-        <div className="th-empty">Nothing tracked yet. Search above and hit Track to build your list.</div>
+        <div className="th-empty">Nothing tracked yet. Search any ticker above and hit Track — your list is saved on this device.</div>
       )}
     </>
   );
@@ -697,13 +813,14 @@ const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,650;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
 .thesis-root {
-  --ink: #0E1320; --panel: #161D2E; --panel2: #1C2436; --line: #232C42;
-  --text: #DCE2EE; --muted: #8B94A7; --paper: #EDE6D6;
+  --ink: #0C0D0F; --panel: #161719; --panel2: #1D1E21; --line: #292A2E;
+  --text: #E5E5E7; --muted: #8C8C92; --paper: #EDE6D6;
   --buy: #3FB68B; --sell: #E25C5C; --amber: #D9A441;
   background: var(--ink); color: var(--text); min-height: 100vh;
   font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 14px;
 }
 .thesis-root * { box-sizing: border-box; }
+.th-header, .th-stats, .th-body, .th-foot { max-width: 1200px; margin-left: auto; margin-right: auto; }
 .thesis-root button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
 .thesis-root :focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
 .pos { color: var(--buy); } .neg { color: var(--sell); }
@@ -770,7 +887,7 @@ const CSS = `
 
 .th-row-wrap { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px;
   background: var(--panel); overflow: hidden; transition: border-color .15s; }
-.th-row-wrap:hover, .th-row-open { border-color: #3A4663; }
+.th-row-wrap:hover, .th-row-open { border-color: #3A3B40; }
 .th-row { display: grid; grid-template-columns: 64px 1fr 150px 130px 70px; gap: 12px;
   align-items: center; width: 100%; padding: 11px 12px; text-align: left; }
 @media (max-width: 860px) {
@@ -849,6 +966,18 @@ const CSS = `
 .th-empty { color: var(--muted); padding: 24px 12px; }
 
 .th-stock-search { width: 100%; margin-bottom: 4px; }
+.th-stock-searchbar { margin-bottom: 8px; }
+.th-stock-hint { display: block; margin-top: 6px; font-size: 11.5px; color: var(--muted);
+  font-family: 'IBM Plex Mono', monospace; }
+.th-lookup-miss { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  color: var(--muted); padding: 16px 12px; }
+.th-track-typed { margin: 4px 0 8px; font-size: 12.5px; color: var(--muted);
+  border: 1px dashed var(--line); border-radius: 6px; padding: 7px 12px; }
+.th-track-typed:hover { border-color: var(--paper); color: var(--text); }
+.th-track-header { display: flex; align-items: baseline; gap: 12px; margin-top: 20px;
+  border-top: 1px solid var(--line); padding-top: 16px; }
+.th-track-header .th-section-h { margin: 0; }
+.th-track-sub { font-size: 11px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
 .th-section-h { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
   color: var(--muted); margin: 16px 0 8px; }
 .th-stockrow { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 0; }
