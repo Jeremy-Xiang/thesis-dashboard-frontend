@@ -275,6 +275,7 @@ export default function ThesisApp() {
     <div className="thesis-root">
       <style>{CSS}</style>
 
+      <div className="th-shell">
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <header className="th-header">
         <div className="th-wordmark">
@@ -539,6 +540,7 @@ export default function ThesisApp() {
         Disclosures sourced from House &amp; Senate financial disclosure filings under the STOCK Act.
         Sizes are reported ranges, not exact amounts. Nothing here is investment advice.
       </footer>
+      </div>
     </div>
   );
 }
@@ -812,21 +814,32 @@ function TradeDetail({ trade, member, excess }) {
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,650;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
+html, body, #root {
+  margin: 0; padding: 0; min-height: 100%;
+  background: #0C0D0F;
+}
 .thesis-root {
   --ink: #0C0D0F; --panel: #161719; --panel2: #1D1E21; --line: #292A2E;
   --text: #E5E5E7; --muted: #8C8C92; --paper: #EDE6D6;
   --buy: #3FB68B; --sell: #E25C5C; --amber: #D9A441;
   background: var(--ink); color: var(--text); min-height: 100vh;
+  width: 100%; overflow-x: hidden;
   font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 14px;
 }
 .thesis-root * { box-sizing: border-box; }
-.th-header, .th-stats, .th-body, .th-foot { max-width: 1200px; margin-left: auto; margin-right: auto; }
+.th-shell {
+  width: min(100%, 1200px);
+  margin-inline: auto;
+  padding-inline: 24px;
+}
+.th-header, .th-stats, .th-body, .th-foot { width: 100%; }
 .thesis-root button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
-.thesis-root :focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
+.thesis-root :focus-visible { outline: 2px solid var(--line); outline-offset: 2px; }
+.thesis-root input:focus-visible { outline: 2px solid #3A3B40; outline-offset: 0; }
 .pos { color: var(--buy); } .neg { color: var(--sell); }
 
 .th-header { display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 18px 24px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  padding: 18px 0 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .th-wordmark { display: flex; align-items: baseline; gap: 12px; }
 .th-wordmark-plate { font-family: 'Fraunces', serif; font-style: italic; font-weight: 650;
   font-size: 26px; color: var(--ink); background: var(--paper); padding: 1px 12px 4px;
@@ -843,8 +856,9 @@ const CSS = `
 
 .th-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   border-bottom: 1px solid var(--line); }
-.th-stat { padding: 14px 24px; border-right: 1px solid var(--line); }
-.th-stat:last-child { border-right: none; }
+.th-stat { padding: 14px 20px; border-right: 1px solid var(--line); }
+.th-stat:first-child { padding-left: 0; }
+.th-stat:last-child { border-right: none; padding-right: 0; }
 .th-stat-v { font-family: 'Fraunces', serif; font-weight: 500; font-size: 24px; }
 .th-stat-v small { font-size: 12px; color: var(--muted); font-family: 'IBM Plex Sans', sans-serif; }
 .th-stat-l { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 2px; }
@@ -866,7 +880,7 @@ const CSS = `
 .th-cluster-alert { margin-top: 12px; background: var(--panel2); border-left: 3px solid var(--paper);
   border-radius: 0 6px 6px 0; padding: 10px 12px; font-size: 12.5px; line-height: 1.45; color: var(--text); }
 
-.th-main { padding: 16px 24px 32px; min-width: 0; }
+.th-main { padding: 16px 0 32px; min-width: 0; }
 .th-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
 .th-tab { padding: 8px 14px 10px; color: var(--muted); font-weight: 500;
   border-bottom: 2px solid transparent; margin-bottom: -1px; }
@@ -1015,7 +1029,7 @@ const CSS = `
 .th-rec-scorebar span { display: block; height: 100%; background: var(--paper); border-radius: 3px; }
 .th-rec-scorenum { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--paper); }
 .th-rec-why { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
-.th-foot { border-top: 1px solid var(--line); padding: 14px 24px; color: var(--muted);
+.th-foot { border-top: 1px solid var(--line); padding: 14px 0 24px; color: var(--muted);
   font-size: 12px; line-height: 1.5; }
 
 @media (prefers-reduced-motion: reduce) {
