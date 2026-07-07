@@ -1,0 +1,62 @@
+/* AlertFeed.css — severity-coded terminal feed for THESIS. */
+
+.af-wrap {
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  color: #d7dae0;
+  font-size: 13px;
+}
+
+.af-toolbar { display: flex; justify-content: space-between; margin-bottom: 10px; }
+.af-filters { display: flex; gap: 6px; }
+
+.af-toolbar button {
+  background: #16181d;
+  border: 1px solid #2a2d34;
+  color: #8b8f98;
+  font: inherit;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.af-toolbar button.af-on,
+.af-toolbar button:hover { color: #f0b429; border-color: #f0b429; }
+.af-scan:disabled { opacity: 0.5; cursor: wait; }
+
+.af-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+
+.af-item { border: 1px solid #2a2d34; border-left-width: 3px; border-radius: 4px; background: #14161a; }
+.af-critical { border-left-color: #ff5252; }
+.af-warning  { border-left-color: #f0b429; }
+.af-info     { border-left-color: #4f6df5; }
+
+.af-row {
+  display: grid;
+  grid-template-columns: 70px 60px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.af-badge  { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #8b8f98; }
+.af-ticker { font-family: "IBM Plex Mono", monospace; font-weight: 600; color: #f0b429; }
+.af-time   { color: #6d717a; font-size: 11px; }
+
+.af-detail {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease;
+  padding: 0 12px;
+}
+.af-detail.af-openrow { max-height: 220px; padding-bottom: 10px; }
+.af-detail pre { background: #0f1114; border-radius: 4px; padding: 8px; font-size: 11px; overflow-x: auto; }
+.af-detail code { color: #8b8f98; font-size: 11px; }
+
+.af-empty, .af-error { padding: 14px; color: #8b8f98; }
+.af-error { color: #ff8a80; }

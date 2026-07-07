@@ -1,0 +1,57 @@
+/* SplitFlap.css — styled for THESIS's terminal aesthetic:
+   dark cells, IBM Plex Mono, amber-on-black. Tweak --sf-accent to retheme. */
+
+.sf-board {
+  --sf-accent: #f0b429;
+  --sf-bg: #16181d;
+  --sf-border: #2a2d34;
+  display: inline-flex;
+  gap: 2px;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+
+.sf-cell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0.85em;
+  padding: 0.12em 0.1em;
+  background: var(--sf-bg);
+  border: 1px solid var(--sf-border);
+  border-radius: 3px;
+  color: var(--sf-accent);
+  font-weight: 600;
+  perspective: 200px;
+}
+
+.sf-char {
+  display: block;
+  transform-origin: center 50%;
+  backface-visibility: hidden;
+}
+
+/* the horizontal split line through the middle of each flap */
+.sf-hinge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+.sf-flip .sf-char {
+  animation: sf-flip-anim 0.36s ease-in-out;
+}
+
+@keyframes sf-flip-anim {
+  0%   { transform: rotateX(0deg); }
+  50%  { transform: rotateX(-88deg); filter: brightness(0.6); }
+  100% { transform: rotateX(0deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sf-flip .sf-char { animation: none; }
+}

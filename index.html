@@ -4,9 +4,51 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>thesis-frontend</title>
+    <title>Thesis — Congressional Trading Tracker | Jeremy Xiang</title>
+    <meta name="description" content="Track stock trades disclosed by U.S. Senate and House members. STOCK Act filings pulled from official disclosure databases, refreshed every 6 hours. A screen, not advice." />
+    <link rel="canonical" href="https://thesis.jeremyxiang.com/" />
+    <meta name="author" content="Jeremy Xiang" />
+    <meta name="theme-color" content="#0C0D0F" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Thesis" />
+    <meta property="og:title" content="Thesis — Congressional Trading Tracker" />
+    <meta property="og:description" content="Senate and House stock disclosures, refreshed every 6 hours." />
+    <meta property="og:url" content="https://thesis.jeremyxiang.com/" />
+    <meta property="og:image" content="https://thesis.jeremyxiang.com/thesis-og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Thesis — congressional trading, tracked" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Thesis — Congressional Trading Tracker" />
+    <meta name="twitter:description" content="Senate and House stock disclosures, refreshed every 6 hours." />
+    <meta name="twitter:image" content="https://thesis.jeremyxiang.com/thesis-og.png" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Thesis",
+      "url": "https://thesis.jeremyxiang.com/",
+      "description": "Congressional trading tracker. Stock trades disclosed by U.S. Senate and House members under the STOCK Act, refreshed every 6 hours.",
+      "applicationCategory": "FinanceApplication",
+      "operatingSystem": "Web",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "author": { "@type": "Person", "name": "Jeremy Xiang", "url": "https://jeremyxiang.com/" }
+    }
+    </script>
   </head>
   <body style="margin:0;background:#0C0D0F">
+    <div id="static-fallback" style="font-family:ui-monospace,monospace;color:#e6e3d8;max-width:640px;margin:4rem auto;padding:0 1.5rem;line-height:1.7">
+      <h1 style="font-size:1.6rem">Thesis — congressional trading intelligence</h1>
+      <p>Stock trades disclosed by members of the U.S. Senate and House, pulled
+      from official STOCK Act disclosure databases and refreshed every 6 hours.
+      Browse trades by member, ticker, transaction type, and amount range.
+      Follow specific members, screen tickers by congressional buying signal.
+      A screen, not advice.</p>
+      <p>Built by <a href="https://jeremyxiang.com/" style="color:#c9a24f">Jeremy Xiang</a>,
+      CS + Economics at UW–Madison.</p>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

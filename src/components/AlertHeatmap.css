@@ -1,0 +1,31 @@
+/* AlertHeatmap.css — amber intensity scale on dark, matching THESIS. */
+
+.ah-wrap {
+  --ah-accent: 240, 180, 41; /* #f0b429 as rgb triplet */
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  color: #8b8f98;
+  font-size: 11px;
+}
+
+.ah-grid { display: flex; gap: 3px; }
+.ah-col  { display: flex; flex-direction: column; gap: 3px; }
+
+.ah-cell {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: #1d2026;
+  border: 1px solid #262a31;
+}
+
+.ah-l1 { background: rgba(var(--ah-accent), 0.25); border-color: rgba(var(--ah-accent), 0.15); }
+.ah-l2 { background: rgba(var(--ah-accent), 0.5);  border-color: rgba(var(--ah-accent), 0.25); }
+.ah-l3 { background: rgba(var(--ah-accent), 0.75); border-color: rgba(var(--ah-accent), 0.4); }
+.ah-l4 { background: rgb(var(--ah-accent));        border-color: rgb(var(--ah-accent)); }
+
+.ah-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+}
